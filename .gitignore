@@ -39,3 +39,15 @@ Thumbs.db
 # Logs and temporary files
 *.log
 *.tmp
+
+# Draft commands
+draft.md
+
+# Safari
+/safari
+
+# Mamba-recall
+/mamba-recall
+
+# Test
+/test
