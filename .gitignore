@@ -1,0 +1,41 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environment
+venv/
+env/
+.env/
+
+# PyTorch / TensorFlow / CUDA
+*.pt
+*.pth
+*.ckpt
+*.tar
+*.log
+*.tfevents.*
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# Data folders (optional: ignore if you don't want to track large datasets)
+datasets/
+data/
+MNIST/
+CIFAR10/
+dSprites/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE / editor files
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# Logs and temporary files
+*.log
+*.tmp
