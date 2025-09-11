@@ -235,17 +235,11 @@ def main(rank, seed=42):
     dataset_name = "CIFAR10"
 
     # Distributed Dataset
-    t0 = time.time()
+
     #dataset = SelectiveCopyDataset(rank=rank, dataset_name=dataset_name, L=4096, seed=seed+rank)
     dataset = InductionHeadDataset(rank=rank, dataset_name=dataset_name, L=256, seed=seed+rank)
-    t1 = time.time()
-    t0 = time.time()
     sampler = DistributedSampler(dataset)  # handles multi-GPU split
-    t1 = time.time()
-    t0 = time.time()
     dataloader = DataLoader(dataset, batch_size=4, sampler=sampler, num_workers=0, pin_memory=True)
-    t1 = time.time()
-
 
     for batch_idx, (videos, labels) in enumerate(dataloader):
         print(f"[Rank {rank}] videos.shape = {videos.shape}, labels.shape = {labels.shape}, labels = {labels}")
