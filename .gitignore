@@ -44,9 +44,16 @@ Thumbs.db
 draft.md
 
 # Slurm Logs
+*/logs
 /logs
 
 # Foreign repos
 /safari
 /mamba-recall
 /test
+
+# checkpoints
+./checkpoints
+*/checkpoints
+
+/wandb

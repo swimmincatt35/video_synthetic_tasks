@@ -50,10 +50,14 @@ class BaseImageSequenceDataset(Dataset, ABC):
 
         # ---- Download with rank 0, sync others ----
         if rank == 0:
+            print(f"[RANK {rank}] downloading...")
             os.makedirs(dataset_dir, exist_ok=True)
             self.base_dataset = self._get_dataset(dataset_dir, transform, download=True)
+        print(f"[RANK {rank}] waiting...")
         dist.barrier(device_ids=[rank])
+        print(f"[RANK {rank}] passed...")
         if rank != 0:
+            print(f"[RANK {rank}] verifying...")
             self.base_dataset = self._get_dataset(dataset_dir, transform, download=False)
 
         # Cache all images per class
@@ -160,8 +164,8 @@ def main(rank, seed=42):
 
     # Distributed Dataset
 
-    #dataset = SelectiveCopyDataset(rank=rank, dataset_name=dataset_name, L=4096, seed=seed+rank)
-    dataset = InductionHeadDataset(rank=rank, dataset_name=dataset_name, L=256, seed=seed+rank)
+    dataset = SelectiveCopyDataset(rank=rank, dataset_name=dataset_name, L=4096, seed=seed+rank)
+    #dataset = InductionHeadDataset(rank=rank, dataset_name=dataset_name, L=256, seed=seed+rank)
     sampler = DistributedSampler(dataset)  # handles multi-GPU split
     dataloader = DataLoader(dataset, batch_size=4, sampler=sampler, num_workers=0, pin_memory=True) # num_workers might cause deadlock
 
