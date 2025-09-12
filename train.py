@@ -37,21 +37,28 @@ def cleanup_distributed():
     dist.destroy_process_group()
 
 
-def train_step(args, model, optimizer, videos, label, device):
+def train_step(args, model, optimizer, videos, labels, device, rank):
     model.train()
+    print(f"[Rank {rank}] ts1")
     videos, labels = videos.to(device), labels.to(device) 
-
+    print(f"[Rank {rank}] ts2")
     optimizer.zero_grad()
+    print(f"[Rank {rank}] ts3")
     initial_states = model.get_initial_recurrent_state(videos.shape[0], device)
+    print(f"[Rank {rank} videos.shape {videos.shape}, labels.shape {labels.shape}, labels {labels}]")
     logits = model(videos, initial_states)  #  [B,rollout,n_classes]
+    print(f"[Rank {rank}] ts4")
     logits = logits.reshape(-1, logits.size(-1))  # [B*rollout,n_classes]
-
+    
     if args.synth_task=='sel_copy':
         labels = labels.reshape(-1)  # [B*rollout]
 
     loss = criterion(logits, labels)
+    print(f"[Rank {rank}] ts5")
     loss.backward()
+    print(f"[Rank {rank}] ts6")
     optimizer.step()
+    print(f"[Rank {rank}] ts7")
 
     return loss
 
@@ -70,7 +77,7 @@ def evaluate(args, model, dataloader, criterion, device):
             break
 
         videos, labels = videos.to(device), labels.to(device)
-        initial_states = model.get_initial_recurrent_state(videos.shape[0], device)
+        initial_states = model.module.get_initial_recurrent_state(videos.shape[0], device)
         logits = model(videos, initial_states)
 
         if args.synth_task=='sel_copy':
@@ -142,7 +149,7 @@ def main(args):
 
     print(f"[Rank {rank}] hi2")
     assert args.batch_size%world_size==0
-    dataloader = DataLoader(dataset, batch_size=args.batch_size//world_size, sampler=sampler, num_workers=2, pin_memory=True)
+    dataloader = DataLoader(dataset, batch_size=args.batch_size//world_size, sampler=sampler, num_workers=0, pin_memory=True)
     print(f"[Rank {rank}] hi3")
 
     # Model, optimizer, criterion
@@ -156,22 +163,26 @@ def main(args):
     ).to(device)
 
     print(f"[Rank {rank}] hi4")
-    model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[rank])
-    optimizer = optim.AdamW(model.parameters(), lr=args.lr)
+    ddp = torch.nn.parallel.DistributedDataParallel(model, device_ids=[rank])
+    print(f"[Rank {rank}] hi5")
+    optimizer = optim.AdamW(ddp.parameters(), lr=args.lr)
+    print(f"[Rank {rank}] hi6")
     criterion = nn.CrossEntropyLoss()
 
     if rank == 0:
         running_loss = 0.0
+    print(f"[Rank {rank}] hi7")
 
-    for step, (videos, labels) in enumerate(dataloader):
-        if step >= args.train_iters:
-            break
-        
+    data_iter = iter(dataloader)
+    for step in range(args.train_iters):    
+        videos, labels = next(data_iter) # oom here
+    
+        print(f"[Rank {rank}] hi8")
         videos = videos.reshape(videos.size(0), videos.size(1), -1) # flatten
         
-        print(f"[Rank {rank}] hi5")
-        loss = train_step(args, model, optimizer, videos, label, device)
-        print(f"[Rank {rank}] hi6")
+        print(f"[Rank {rank}] hi9")
+        loss = train_step(args, ddp, optimizer, videos, labels, device, rank)
+        print(f"[Rank {rank}] hi10")
         if rank == 0:
             running_loss += loss.item()
             running_loss /= (step+1)
@@ -182,7 +193,7 @@ def main(args):
                 wandb_logger.log({"train/loss": loss.item()}, step=step+1)
         
         if (step+1) % args.eval_every == 0:
-            eval_loss, eval_acc, eval_batch_acc = evaluate(args, model, dataloader, criterion, device)
+            eval_loss, eval_acc, eval_batch_acc = evaluate(args, ddp, dataloader, criterion, device)
             if rank == 0:
                 print(f"[Step {step+1}] Eval Loss: {eval_loss:.4f}, Eval Acc: {eval_acc:.4f}, Eval Batch Acc: {eval_batch_acc:.4f}")
                 wandb.log({"eval/loss": eval_loss, "eval/acc": eval_acc, "eval/batch_acc": eval_batch_acc}, step=step+1)
@@ -190,7 +201,7 @@ def main(args):
         if (step+1) % args.save_every == 0 and rank == 0:
             ckpt_path = os.path.join(args.save_dir, f"checkpoint_epoch{step+1}.pt")
             os.makedirs(args.save_dir, exist_ok=True)
-            torch.save(model.module.state_dict(), ckpt_path)
+            torch.save(ddp.module.state_dict(), ckpt_path)
             print(f"[Rank 0] Saved checkpoint to {ckpt_path}")
 
     cleanup_distributed()
