@@ -9,6 +9,13 @@ from torch.utils.data import Dataset
 from abc import ABC, abstractmethod
 
 
+def infinite_dataloader(dataloader):
+    """Yield batches forever."""
+    while True:
+        for batch in dataloader:
+            yield batch
+
+
 class BaseImageSequenceDataset(Dataset, ABC):
     def __init__(self, rank, dataset_name, root="/ubc/cs/research/plai-scratch/chsu35/datasets", seed=None):
         """
@@ -74,7 +81,8 @@ class BaseImageSequenceDataset(Dataset, ABC):
             )
 
     def __len__(self):
-        return 2**31 - 1   # arbitrary large size.
+        #return 2**31 - 1   # arbitrary large size.
+        return 50
 
     @abstractmethod
     def __getitem__(self, idx):
@@ -145,3 +153,49 @@ class SelectiveCopyDataset(BaseImageSequenceDataset):
 
 
 
+
+if __name__ == "__main__":
+    import time
+    import torch.distributed as dist
+    import torch.multiprocessing as mp
+    from torch.utils.data import DataLoader, DistributedSampler
+
+    CUDA_VISIBLE_DEVICES = int(os.environ["LOCAL_RANK"])
+
+    def setup_distributed():
+        rank = int(os.environ['RANK'])
+        world_size = int(os.environ['WORLD_SIZE'])
+        torch.cuda.set_device(rank) 
+        dist.init_process_group(backend='nccl', rank=rank, world_size=world_size)
+        return rank, world_size
+
+    def cleanup_distributed():
+        dist.destroy_process_group()
+
+    def test_sequence_dataset_main(rank, seed=42):
+        dataset_name = "MNIST"
+
+        dataset = SelectiveCopyDataset(rank=rank, dataset_name=dataset_name, L=4096, seed=seed+rank)
+        #dataset = InductionHeadDataset(rank=rank, dataset_name=dataset_name, L=256, seed=seed+rank)
+        inf_dataloader = infinite_dataloader(DataLoader(dataset, batch_size=4, num_workers=0, pin_memory=True))
+
+        #for batch_idx, (videos, labels) in enumerate(dataloader): # oom here
+        #    print(f"[Rank {rank}] videos.shape = {videos.shape}, labels.shape = {labels.shape}, labels = {labels}")
+        #    break
+
+        start = time.time()
+
+        for i in range(100):  # however many steps you want
+            batch = next(inf_dataloader)
+            videos, labels = batch
+            print(f"[Rank {rank}] videos.shape = {videos.shape}, labels.shape = {labels.shape}, labels = {labels}")
+        
+        end = time.time()
+        print(f"[Rank {rank}] Time for 100 steps: {end - start:.4f} seconds")
+        print(f"[Rank {rank}] Avg step time: {(end - start) / 100:.6f} seconds")
+
+
+    seed=42
+    rank, world_size = setup_distributed()
+    test_sequence_dataset_main(rank,seed)
+    cleanup_distributed()
