@@ -133,12 +133,12 @@ def main(args):
     # Dataset + Dataloader
     if args.synth_task == 'ind_head':
         print(f"[Rank {rank}] ind_head")
-        dataset = InductionHeadDataset(rank=rank, dataset_name=args.dataset_name, L=args.seq_length, seed=args.seed+rank)
+        dataset = InductionHeadDataset(rank=rank, dataset_name=args.dataset_name, L=args.seq_length, seed=args.seed+rank, root=args.dataset_dir)
         print(f"[Rank {rank}] ind_head done")
         
     elif args.synth_task.upper() == 'sel_copy':
         print(f"[Rank {rank}] sel_copy")
-        dataset = SelectiveCopyDataset(rank=rank, dataset_name=args.dataset_name, L=args.seq_length, seed=args.seed+rank)
+        dataset = SelectiveCopyDataset(rank=rank, dataset_name=args.dataset_name, L=args.seq_length, seed=args.seed+rank, root=args.dataset_dir)
         print(f"[Rank {rank}] sel_copy done")
 
     else:
@@ -221,6 +221,7 @@ if __name__ == "__main__":
 
     # Dataset
     parser.add_argument("--synth_task", type=str, default="ind_head", help="ind_head | sel_copy")
+    parser.add_argument("--dataset_dir", type=str, default="/ubc/cs/research/plai-scratch/chsu35/datasets", help="root directory for dataset, normally in scratch")
     parser.add_argument("--dataset_name", type=str, default="CIFAR10", help="MNIST | CIFAR10")
     parser.add_argument("--seq_length", type=int, default=256)
     parser.add_argument("--batch_size", type=int, default=16)

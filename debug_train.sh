@@ -11,8 +11,10 @@
 #SBATCH --error=logs/%x_%j.err   
 
 # Activate your virtual environment
-source /ubc/cs/research/plai-scratch/chsu35/virtual_envs/vid_synth_tasks/bin/activate
+# source /ubc/cs/research/plai-scratch/chsu35/virtual_envs/vid_synth_tasks/bin/activate
+# cd /ubc/cs/research/fwood/chsu35/video_synthetic_tasks
 
+source ./test/bin/activate
 PORT=$((10000 + RANDOM % 50000))
 
 nvidia-smi
@@ -23,6 +25,7 @@ torchrun --nproc_per_node=2 --rdzv_endpoint=localhost:$PORT train.py \
     --num_heads 2 \
     --rnn_type mingru \
     --dataset_name MNIST \
+    --dataset_dir /ubc/cs/research/plai-scratch/chsu35/datasets \
     --seq_length 256 \
     --synth_task ind_head \
     --batch_size 2 \
