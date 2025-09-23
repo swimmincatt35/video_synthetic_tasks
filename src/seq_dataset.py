@@ -194,7 +194,6 @@ if __name__ == "__main__":
         print(f"[Rank {rank}] Time for 100 steps: {end - start:.4f} seconds")
         print(f"[Rank {rank}] Avg step time: {(end - start) / 100:.6f} seconds")
 
-
     seed=42
     rank, world_size = setup_distributed()
     test_sequence_dataset_main(rank,seed)
