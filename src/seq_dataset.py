@@ -1,4 +1,5 @@
 import os
+import argparse
 import urllib.request
 import torch
 import torch.distributed as dist
@@ -91,9 +92,9 @@ class BaseImageSequenceDataset(Dataset, ABC):
 
 
 class InductionHeadDataset(BaseImageSequenceDataset):
-    def __init__(self, rank, dataset_name="MNIST", root="/ubc/cs/research/plai-scratch/chsu35/datasets", L=256, seed=None):
+    def __init__(self, rank, dataset_name="MNIST", root="/ubc/cs/research/plai-scratch/chsu35/datasets", seq_len=256, seed=None):
         super().__init__(rank, dataset_name, root, seed)
-        self.L = L
+        self.L = seq_len
         self.special_token = torch.ones(self.C, self.H, self.W)
 
     def __getitem__(self, idx):
@@ -124,11 +125,10 @@ class InductionHeadDataset(BaseImageSequenceDataset):
         return seq, seq_label
 
 
-
 class SelectiveCopyDataset(BaseImageSequenceDataset):
-    def __init__(self, rank, dataset_name="MNIST", root="/ubc/cs/research/plai-scratch/chsu35/datasets", L=4096, seed=42):
+    def __init__(self, rank, dataset_name="MNIST", root="/ubc/cs/research/plai-scratch/chsu35/datasets", seq_len=4096, seed=42):
         super().__init__(rank, dataset_name, root, seed)
-        self.L = L
+        self.L = seq_len
 
     def __getitem__(self, idx):
         L, N, C, H, W = self.L, self.N, self.C, self.H, self.W
@@ -152,8 +152,6 @@ class SelectiveCopyDataset(BaseImageSequenceDataset):
         return video, labels
 
 
-
-
 if __name__ == "__main__":
     import time
     import torch.distributed as dist
@@ -161,6 +159,20 @@ if __name__ == "__main__":
     from torch.utils.data import DataLoader, DistributedSampler
 
     CUDA_VISIBLE_DEVICES = int(os.environ["LOCAL_RANK"])
+
+    def parse_args():
+        """Parse command line arguments."""
+        parser = argparse.ArgumentParser(description='Dataset training script')
+        parser.add_argument('--seed', type=int, default=42, help='Random seed for reproducibility')
+        parser.add_argument('--dataset', type=str, default="MNIST", choices=["MNIST", "CIFAR10"], help='Dataset to use')
+        parser.add_argument('--dataset_root', type=str, default="/ubc/cs/research/plai-scratch/chsu35/datasets", help='Root directory for datasets')
+        parser.add_argument('--dataset_type', type=str, default="selective", choices=["selective", "induction"],
+                             help='Type of dataset: selective (SelectiveCopyDataset) or induction (InductionHeadDataset)')
+        parser.add_argument('--seq_len', type=int, default=-1, help='Sequence length for SelectiveCopyDataset')
+        parser.add_argument('--batch_size', type=int, default=4, help='Batch size for training')
+        parser.add_argument('--num_steps', type=int, default=100, help='Number of training steps to run')
+                        
+        return parser.parse_args()
 
     def setup_distributed():
         rank = int(os.environ['RANK'])
@@ -172,29 +184,61 @@ if __name__ == "__main__":
     def cleanup_distributed():
         dist.destroy_process_group()
 
-    def test_sequence_dataset_main(rank, seed=42):
-        dataset_name = "MNIST"
-
-        dataset = SelectiveCopyDataset(rank=rank, dataset_name=dataset_name, L=4096, seed=seed+rank)
-        #dataset = InductionHeadDataset(rank=rank, dataset_name=dataset_name, L=256, seed=seed+rank)
-        inf_dataloader = infinite_dataloader(DataLoader(dataset, batch_size=4, num_workers=0, pin_memory=True))
-
-        #for batch_idx, (videos, labels) in enumerate(dataloader): # oom here
-        #    print(f"[Rank {rank}] videos.shape = {videos.shape}, labels.shape = {labels.shape}, labels = {labels}")
-        #    break
+    def test_sequence_dataset_main(rank, args):
+        # Create dataset based on type
+        if args.dataset_type == "selective":
+            dataset = SelectiveCopyDataset(
+                rank=rank, 
+                dataset_name=args.dataset, 
+                seq_len=args.seq_len, 
+                seed=args.seed + rank, 
+                root=args.dataset_root
+            )
+        else:  # induction
+            dataset = InductionHeadDataset(
+                rank=rank, 
+                dataset_name=args.dataset, 
+                seq_len=args.seq_len,  
+                seed=args.seed + rank, 
+                root=args.dataset_root
+            )
+        
+        inf_dataloader = infinite_dataloader(DataLoader(
+            dataset, 
+            batch_size=args.batch_size, 
+            num_workers=0, 
+            pin_memory=True
+        ))
 
         start = time.time()
 
-        for i in range(100):  # however many steps you want
+        for i in range(args.num_steps):
             batch = next(inf_dataloader)
             videos, labels = batch
-            print(f"[Rank {rank}] videos.shape = {videos.shape}, labels.shape = {labels.shape}, labels = {labels}")
+            print(f"[Rank {rank}] Step {i+1}/{args.num_steps} - videos.shape = {videos.shape}, labels.shape = {labels.shape}, labels = {labels}")
         
         end = time.time()
-        print(f"[Rank {rank}] Time for 100 steps: {end - start:.4f} seconds")
-        print(f"[Rank {rank}] Avg step time: {(end - start) / 100:.6f} seconds")
+        print(f"[Rank {rank}] Time for {args.num_steps} steps: {end - start:.4f} seconds")
+        print(f"[Rank {rank}] Avg step time: {(end - start) / args.num_steps:.6f} seconds")
 
-    seed=42
+    # Parse command line arguments
+    args = parse_args()
+
+    if args.seq_len==-1: # default
+        if args.dataset_type=="selective":
+            args.seq_len = 4096
+        elif args.dataset_type=="induction":
+            args.seq_len = 256
+    
+    print(f"Running with arguments:")
+    print(f"  Seed: {args.seed}")
+    print(f"  Dataset: {args.dataset}")
+    print(f"  Dataset type: {args.dataset_type}")
+    print(f"  Dataset root: {args.dataset_root}")
+    print(f"  Sequence length (seq_len): {args.seq_len}")
+    print(f"  Batch size: {args.batch_size}")
+    print(f"  Number of steps: {args.num_steps}")
+    
     rank, world_size = setup_distributed()
-    test_sequence_dataset_main(rank,seed)
+    test_sequence_dataset_main(rank, args)
     cleanup_distributed()

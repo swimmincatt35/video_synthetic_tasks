@@ -10,3 +10,6 @@ pip install scipy imageio matplotlib seaborn wandb
 pip freeze > requirements.txt
 ```
 
+# Canada Compute
+Download MNIST/CIFAR10/dSprites locally and scp to Compute Canada.
+

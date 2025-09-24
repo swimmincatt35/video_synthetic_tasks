@@ -6,7 +6,11 @@ import torchvision.transforms as transforms
 # ===========================
 # Base directory for all datasets
 # ===========================
-base_dir = "/ubc/cs/research/plai-scratch/chsu35/datasets"
+
+# UBC cluster, not possible to download from internet on Compute Canada clusters
+# base_dir = "/ubc/cs/research/plai-scratch/chsu35/datasets"
+
+base_dir = ...
 os.makedirs(base_dir, exist_ok=True)
 
 # Dataset-specific directories
