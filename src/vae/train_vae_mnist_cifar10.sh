@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=debug_vae
+#SBATCH --job-name=train_vae
 #SBATCH --nodes=1
 #SBATCH --ntasks=1          
 #SBATCH --gres=gpu:1       
