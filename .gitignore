@@ -44,8 +44,9 @@ Thumbs.db
 draft.md
 
 # Slurm Logs
-*/logs
-/logs
+logs/
+**/logs/
+
 
 # Foreign repos
 /safari
@@ -56,6 +57,12 @@ draft.md
 ./checkpoints
 */checkpoints
 
-/wandb
+wandb/
+**/wandb/
+
+# Config files (secrets)
+config/*.json
+configs/
+**/configs/
 
 narval*

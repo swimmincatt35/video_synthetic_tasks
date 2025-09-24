@@ -168,9 +168,9 @@ def load_checkpoint(model, optimizer, path, device):
 # Main with argparse
 # -------------------------
 def main():
-    import wandb, socket
+    import wandb, socket, json
 
-    def setup_wandb(config: dict, project_name: str, run_name: str = None, mode: str = None):
+    def setup_wandb(config: dict, wandb_config: dict, run_name: str = None, mode: str = None):
         """
         Initializes wandb with automatic offline fallback if internet is unavailable.
         """
@@ -184,8 +184,10 @@ def main():
                 mode = "offline"
 
         os.environ["WANDB_MODE"] = mode  # makes wandb respect mode globally
+        wandb.login(key=wandb_config["api_key"])
         wandb.init(
-            project=project_name,
+            project=wandb_config["project"],
+            entity=wandb_config["entity"],  
             name=run_name,
             mode=mode,  # redundant but explicit
             config=config
@@ -195,6 +197,7 @@ def main():
     parser = argparse.ArgumentParser(description="ConvVAE for MNIST/CIFAR10")
     parser.add_argument("--dataset", type=str, default="cifar10", choices=["mnist", "cifar10"])
     parser.add_argument('--dataset_root', type=str, default="/scratch/chsuae/datasets")
+    parser.add_argument('--wandb_config', type=str, default=None)
     parser.add_argument("--batch_size", type=int, default=128)
     parser.add_argument("--epochs", type=int, default=20)
     parser.add_argument("--latent_ch", type=int, default=4)
@@ -207,7 +210,8 @@ def main():
     parser.add_argument("--resume", type=str, default=None, help="Path to checkpoint to resume from")
     args = parser.parse_args()
 
-    output_dir = os.path.join(args.output_dir, f"vae-{args.dataset}-lr{args.lr}-b{args.batch_size}-kld{args.kld_coef}")
+    run_name = f"vae-{args.dataset}-lr{args.lr}-b{args.batch_size}-kld{args.kld_coef}"
+    output_dir = os.path.join(args.output_dir, run_name)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     transform = transforms.ToTensor()
@@ -236,9 +240,12 @@ def main():
         mu, _ = model.encoder(dummy_input)
     latent_shape = mu.shape[1:]
 
+    print(f"Loading wandb config file: {args.wandb_config}")
+    with open(args.wandb_config) as f:
+        wandb_config = json.load(f)
     setup_wandb(config=vars(args), 
-                project_name=f"vae-{args.dataset}", 
-                run_name=f"job_{os.getenv('SLURM_JOB_ID', 'local')}",
+                wandb_config=wandb_config,
+                run_name=run_name,
                 mode="offline"
                 )
     print(f"VAE Config: {vars(args)}")

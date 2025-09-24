@@ -31,15 +31,16 @@ DATASET_ROOT="/ubc/cs/research/plai-scratch/chsu35/datasets"
 OUTPUT_DIR="/ubc/cs/research/plai-scratch/chsu35/vae-runs"
 
 # --------- Hyperparameters ----------
-DATASET="cifar10"
+DATASET="mnist"
 BATCH_SIZE=128
-EPOCHS=200
+EPOCHS=500
 LATENT_CH=4
 BASE_CH=32
-LR=1e-3
-KLD_COEF=5e-3
+LR=7e-4 # 1e-3 / 7e-4
+KLD_COEF=5e-4 # 1e-4 / 5e-4
 SAVE_INTV=50
 DUMP_INT=25
+WANDB_CONF="/ubc/cs/research/fwood/chsu35/video_synthetic_tasks/src/vae/configs/wandb_config.json"
 
 # --------- Run Training ----------
 echo "[INFO] Starting training job $SLURM_JOB_ID ..."
@@ -54,7 +55,9 @@ singularity exec --nv --bind ${PROJECT} --bind ${DATASET_ROOT} --bind ${OUTPUT_D
     --lr $LR \
     --kld_coef $KLD_COEF \
     --output_dir $OUTPUT_DIR \
-    --save_interval $SAVE_INTV 
+    --save_interval $SAVE_INTV \
+    --dump_interval $DUMP_INT \
+    --wandb_config $WANDB_CONF
 
 
 # UBC / Compute Canada Slurm
