@@ -50,7 +50,7 @@ def save_reconstructions(model, dataloader, device, epoch, outdir):
     x, _ = next(iter(dataloader))
     x = x.to(device)
     with torch.no_grad():
-        x_hat, _, _ = model(x)
+        x_hat, _, _ = model(x, determ=True)
     for i in range(4): # minibatches in 2x8 fashion
         grid = torch.cat([x[8*i:8*(i+1)], x_hat[8*i:8*(i+1)]], dim=0)
         path = f"{outdir}/recon_epoch_{epoch}_minibatch_{i}.png"

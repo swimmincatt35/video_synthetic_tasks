@@ -5,7 +5,7 @@ from torch.utils.data import DataLoader
 import argparse, os, json
 import wandb
 
-from vae import ConvVAE  # import your model class
+from vae import ConvVAE 
 
 @torch.no_grad()
 def evaluate_reconstruction(model, dataloader, device, outdir, num_batches=1):
@@ -23,7 +23,7 @@ def evaluate_reconstruction(model, dataloader, device, outdir, num_batches=1):
             break
 
         x = x.to(device)
-        x_hat, _, _ = model(x)
+        x_hat, _, _ = model(x, determ=True)
 
         # Compute MSE for this batch
         mse = torch.mean((x_hat - x) ** 2).item()

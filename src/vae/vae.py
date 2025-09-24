@@ -74,7 +74,10 @@ class ConvVAE(nn.Module):
         eps = torch.randn_like(std)
         return mu + eps * std
 
-    def forward(self, x):
+    def forward(self, x, determ=False):
         mu, logvar = self.encoder(x)
-        z = self.reparameterize(mu, logvar)
+        if determ:
+            z = self.reparameterize(mu, logvar)
+        else:
+            z = mu
         return self.decoder(z), mu, logvar

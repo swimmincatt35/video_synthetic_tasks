@@ -26,11 +26,11 @@ class BaseImageSequenceDataset(Dataset, ABC):
         self.dataset_name = dataset_name.upper()
         self.seed = seed
 
-        if self.dataset_name == "MNIST":
+        if self.dataset_name == "mnist":
             dataset_dir = os.path.join(root, "MNIST")
             self.C, self.H, self.W = 1, 28, 28
             num_classes = 10
-        elif self.dataset_name == "CIFAR10":
+        elif self.dataset_name == "cifar10":
             dataset_dir = os.path.join(root, "CIFAR10")
             self.C, self.H, self.W = 3, 32, 32
             num_classes = 10
@@ -66,14 +66,14 @@ class BaseImageSequenceDataset(Dataset, ABC):
 
     def _get_dataset(self, dataset_dir, transform, download):
         """Helper to fetch MNIST or CIFAR10 dataset."""
-        if self.dataset_name == "MNIST":
+        if self.dataset_name == "mnist":
             return torchvision.datasets.MNIST(
                 root=os.path.join(dataset_dir, "train"),
                 train=True,
                 transform=transform,
                 download=download
             )
-        elif self.dataset_name == "CIFAR10":
+        elif self.dataset_name == "cifar10":
             return torchvision.datasets.CIFAR10(
                 root=os.path.join(dataset_dir, "train"),
                 train=True,
@@ -92,7 +92,7 @@ class BaseImageSequenceDataset(Dataset, ABC):
 
 
 class InductionHeadDataset(BaseImageSequenceDataset):
-    def __init__(self, rank, dataset_name="MNIST", root="/ubc/cs/research/plai-scratch/chsu35/datasets", seq_len=256, seed=None):
+    def __init__(self, rank, dataset_name="mnist", root="/ubc/cs/research/plai-scratch/chsu35/datasets", seq_len=256, seed=None):
         super().__init__(rank, dataset_name, root, seed)
         self.L = seq_len
         self.special_token = torch.ones(self.C, self.H, self.W)
@@ -126,7 +126,7 @@ class InductionHeadDataset(BaseImageSequenceDataset):
 
 
 class SelectiveCopyDataset(BaseImageSequenceDataset):
-    def __init__(self, rank, dataset_name="MNIST", root="/ubc/cs/research/plai-scratch/chsu35/datasets", seq_len=4096, seed=42):
+    def __init__(self, rank, dataset_name="mnist", root="/ubc/cs/research/plai-scratch/chsu35/datasets", seq_len=4096, seed=42):
         super().__init__(rank, dataset_name, root, seed)
         self.L = seq_len
 
@@ -164,7 +164,7 @@ if __name__ == "__main__":
         """Parse command line arguments."""
         parser = argparse.ArgumentParser(description='Dataset training script')
         parser.add_argument('--seed', type=int, default=42, help='Random seed for reproducibility')
-        parser.add_argument('--dataset', type=str, default="MNIST", choices=["MNIST", "CIFAR10"], help='Dataset to use')
+        parser.add_argument('--dataset', type=str, default="mnist", choices=["mnist", "cifar10"], help='Dataset to use')
         parser.add_argument('--dataset_root', type=str, default="/ubc/cs/research/plai-scratch/chsu35/datasets", help='Root directory for datasets')
         parser.add_argument('--dataset_type', type=str, default="selective", choices=["selective", "induction"],
                              help='Type of dataset: selective (SelectiveCopyDataset) or induction (InductionHeadDataset)')

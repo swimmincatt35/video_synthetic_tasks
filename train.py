@@ -17,12 +17,11 @@ import torch.nn as nn
 import torch.optim as optim
 import torch.distributed as dist
 import torch.multiprocessing as mp
-
 from torch.utils.data import DataLoader, DistributedSampler
+
 from models.encoders import RecurrentEncoder
 from seq_dataset import InductionHeadDataset, SelectiveCopyDataset 
-
-
+from vae.vae import ConvVAE
 
 
 def setup_distributed():
@@ -152,7 +151,7 @@ def main(args):
     dataloader = DataLoader(dataset, batch_size=args.batch_size//world_size, sampler=sampler, num_workers=0, pin_memory=True)
     print(f"[Rank {rank}] hi3")
 
-    # Model, optimizer, criterion
+    # Model, vae, optimizer, criterion
     model = RecurrentEncoder(
         output_dim=args.output_dim,
         num_layers=args.num_layers,
@@ -161,6 +160,13 @@ def main(args):
         is_video_synth_task=True,
         video_synth_task_out_dim=10
     ).to(device)
+
+    if args.dataset_name=="mnist":
+        in_ch = out_ch = 1
+    elif args.dataset_name=="cifar10":
+        in_ch = out_ch = 3
+    vae = ConvVAE(in_ch=in_ch, out_ch=out_ch, latent_ch=4, base_ch=32).to(device)
+    vae.eval() 
 
     print(f"[Rank {rank}] hi4")
     ddp = torch.nn.parallel.DistributedDataParallel(model, device_ids=[rank])
@@ -175,10 +181,16 @@ def main(args):
 
     data_iter = iter(dataloader)
     for step in range(args.train_iters):    
-        videos, labels = next(data_iter) # oom here
+        videos, labels = next(data_iter) 
     
         print(f"[Rank {rank}] hi8")
+        print(videos.shape)
+        print(labels.shape)
         videos = videos.reshape(videos.size(0), videos.size(1), -1) # flatten
+
+        exit(0)
+        with torch.no_grad():  
+            mu, _ = vae.encode(x)
         
         print(f"[Rank {rank}] hi9")
         loss = train_step(args, ddp, optimizer, videos, labels, device, rank)
@@ -222,7 +234,7 @@ if __name__ == "__main__":
     # Dataset
     parser.add_argument("--synth_task", type=str, default="ind_head", help="ind_head | sel_copy")
     parser.add_argument("--dataset_dir", type=str, default="/ubc/cs/research/plai-scratch/chsu35/datasets", help="root directory for dataset, normally in scratch")
-    parser.add_argument("--dataset_name", type=str, default="CIFAR10", help="MNIST | CIFAR10")
+    parser.add_argument("--dataset_name", type=str, default="cifar10", choices=["mnist", "cifar10"])
     parser.add_argument("--seq_length", type=int, default=256)
     parser.add_argument("--batch_size", type=int, default=16)
     parser.add_argument("--seed", type=int, default=42)

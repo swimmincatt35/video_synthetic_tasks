@@ -24,10 +24,10 @@ OUTPUT_DIR="/ubc/cs/research/plai-scratch/chsu35/vae-test-runs"
 CKPT_DIR="/ubc/cs/research/plai-scratch/chsu35/vae-runs/"
 
 # Checkpoints
-DATASET=cifar10
-CKPT_PATH="/ubc/cs/research/plai-scratch/chsu35/vae-runs/vae-cifar10-lr0.001-b128-kld0.0001/checkpoints/vae_epoch_300.pt"
-# DATASET=mnist
-# CKPT_PATH="/ubc/cs/research/plai-scratch/chsu35/vae-runs/vae-mnist-lr0.001-b128-kld0.0001/checkpoints/vae_epoch_300.pt"
+# DATASET=cifar10
+# CKPT_PATH="/ubc/cs/research/plai-scratch/chsu35/vae-runs/vae-cifar10-lr0.001-b128-kld0.0001/checkpoints/vae_epoch_300.pt"
+DATASET=mnist
+CKPT_PATH="/ubc/cs/research/plai-scratch/chsu35/vae-runs/vae-mnist-lr0.001-b128-kld0.0001/checkpoints/vae_epoch_300.pt"
 
 singularity exec --nv --bind ${PROJECT} --bind ${DATASET_ROOT} --bind ${OUTPUT_DIR} --bind ${CKPT_DIR} \
   ${SIF_PATH} python3 test_vae_mnist_cifar10.py \
