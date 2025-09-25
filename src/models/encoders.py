@@ -274,29 +274,43 @@ class RecurrentEncoder(nn.Module):
         # ---- original full-sequence paths (MinGRU/xLSTM/Mamba training) ----
         if initial_recurrent_states is None:
             initial_recurrent_states = self.get_initial_recurrent_state(B, time_encoding.device)
+        # print("initial_recurrent_states.shape", initial_recurrent_states.shape) # [num_layers, B, 1, H]
+        # print("time_encoding.shape", time_encoding.shape) # [B, L, H]
 
         rnn_states = []
         x = time_encoding
         for i, l in enumerate(self.recurrent_encoder_layers):
-            if self.rnn_type == 'mingru':
+            if self.rnn_type == 'mingru': # oom
                 x, s_i = l(x, initial_recurrent_states[i], gradient_checkpoint=gradient_checkpoint)
+                # print("x.shape", x.shape)       # [B, L, H]
+                # print("s_i.shape", s_i.shape)   # [B, L, H]
             else:
                 x, s_i = l(x, None, gradient_checkpoint=gradient_checkpoint)
             rnn_states.append(s_i)
         rnn_states = torch.stack(rnn_states, dim=0)
+        # print("rnn_states.shape", rnn_states.shape) # [num_layers, B, L, H]
 
         if self.is_video_synth_task:
-            x = x[:, -1:, :]
             logits_rollout = []
+
             for _ in range(self.synth_task_rollout_len):
+                x = x[:, -1:, :] # [B, 1, H]
+                initial_recurrent_states = rnn_states[:, :, -1:, :] # [num_layers, B, 1, H]
+
+                rnn_states = []
                 for i, l in enumerate(self.recurrent_encoder_layers):
                     if self.rnn_type == 'mingru':
-                        x, _ = l(x, initial_recurrent_states[i], gradient_checkpoint=gradient_checkpoint)
+                        # print("rnn_states[i, :, -1:, :].shape", rnn_states[i, :, -1:, :].shape) # [B, 1, H]
+                        x, s_i = l(x, initial_recurrent_states[i], gradient_checkpoint=gradient_checkpoint)
                     else:
                         ValueError(f"Unsupported rnn_type: {self.rnn_type}")
+                    rnn_states.append(s_i)
+                rnn_states = torch.stack(rnn_states, dim=0)
+
                 x_last_element = x[:, -1, :] 
                 logits = self.post_MLP(x_last_element)
                 logits_rollout.append(logits)
+
             logits_rollout = torch.stack(logits_rollout, dim=1)
             return logits_rollout
 

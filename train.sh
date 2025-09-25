@@ -5,7 +5,7 @@
 #SBATCH --gres=gpu:2       
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=64G  
-#SBATCH --time=06:00:00
+#SBATCH --time=12:00:00
 #SBATCH --partition=plai
 #SBATCH --output=logs/%x_%j.out    
 #SBATCH --error=logs/%x_%j.err   
@@ -33,12 +33,12 @@ HOST_PATH="/ubc/cs/research/fwood/chsu35/video_synthetic_tasks/src/selective_sca
 CONTAINER_PATH="/usr/local/lib/python3.10/dist-packages/mamba_ssm/ops/selective_scan_interface.py"
 
 # --------- Hyperparameters ---------
-DATASET="cifar10" # "cifar10" / "mnist"
-# VAE_PATH="/ubc/cs/research/plai-scratch/chsu35/vae-runs/vae-mnist-lr0.001-b128-kld0.0001/checkpoints/vae_epoch_300.pt"
-VAE_PATH="/ubc/cs/research/plai-scratch/chsu35/vae-runs/vae-cifar10-lr0.001-b128-kld0.0001/checkpoints/vae_epoch_300.pt"
+DATASET="mnist" # "cifar10" / "mnist"
+VAE_PATH="/ubc/cs/research/plai-scratch/chsu35/vae-runs/vae-mnist-lr0.001-b128-kld0.0001/checkpoints/vae_epoch_300.pt"
+# VAE_PATH="/ubc/cs/research/plai-scratch/chsu35/vae-runs/vae-cifar10-lr0.001-b128-kld0.0001/checkpoints/vae_epoch_300.pt"
 SYNTH_TASK="ind_head" # "ind_head" / "sel_copy"
 BATCH_SIZE=128
-TRAIN_ITERS=1000 # 1000 / 2
+TRAIN_ITERS=2000 # 1000 / 2
 LR=1e-3 # 1e-3 / 7e-4
 LOG_EVERY=10 # 10 / 1
 EVAL_EVERY=50 # 50 / 1
