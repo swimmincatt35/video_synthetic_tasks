@@ -82,7 +82,7 @@ def train_step(args, model, optimizer, latents, labels, criterion, device, rank)
 
 
 @torch.no_grad()
-def evaluate(args, model, inf_dataloader, criterion, vae, device):
+def evaluate(args, model, inf_dataloader, criterion, vae, world_size, device):
     model.eval()
     total_loss, logit_correct, total_logits = 0.0, 0, 0    
     batch_correct = 0
@@ -137,7 +137,7 @@ def evaluate(args, model, inf_dataloader, criterion, vae, device):
         dist.all_reduce(batch_correct_tensor, op=dist.ReduceOp.SUM)
         dist.all_reduce(total_batches_tensor, op=dist.ReduceOp.SUM)
     
-    avg_loss = total_loss_tensor.item() / (step + 1)
+    avg_loss = total_loss_tensor.item() / (step * world_size)
     accuracy = logit_correct_tensor.item() / total_logits_tensor.item()
     batch_accuracy = (
         batch_correct_tensor.item() / total_batches_tensor.item()
@@ -255,7 +255,7 @@ def main(args):
         
         if (step+1) % args.eval_every == 0:
             dist_utils.print0("Evaluating... ")
-            eval_loss, eval_acc, eval_batch_acc = evaluate(args, ddp, inf_dataloader, criterion, vae, device)
+            eval_loss, eval_acc, eval_batch_acc = evaluate(args, ddp, inf_dataloader, criterion, vae, world_size, device)
             if rank == 0:
                 dist_utils.print0(f"[Step {step+1}] Eval Loss: {eval_loss:.4f}, Eval Acc: {eval_acc:.4f}, Eval Batch Acc: {eval_batch_acc:.4f}")
                 wandb.log({"eval/loss": eval_loss, "eval/acc": eval_acc, "eval/batch_acc": eval_batch_acc}, step=step+1)
