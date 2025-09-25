@@ -5,7 +5,7 @@
 #SBATCH --gres=gpu:2       
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=64G  
-#SBATCH --time=01:00:00
+#SBATCH --time=06:00:00
 #SBATCH --partition=plai
 #SBATCH --output=logs/%x_%j.out    
 #SBATCH --error=logs/%x_%j.err   
@@ -36,12 +36,13 @@ CONTAINER_PATH="/usr/local/lib/python3.10/dist-packages/mamba_ssm/ops/selective_
 DATASET="cifar10" # "cifar10" / "mnist"
 # VAE_PATH="/ubc/cs/research/plai-scratch/chsu35/vae-runs/vae-mnist-lr0.001-b128-kld0.0001/checkpoints/vae_epoch_300.pt"
 VAE_PATH="/ubc/cs/research/plai-scratch/chsu35/vae-runs/vae-cifar10-lr0.001-b128-kld0.0001/checkpoints/vae_epoch_300.pt"
-SYNTH_TASK="sel_copy" # "ind_head" / "sel_copy"
+SYNTH_TASK="ind_head" # "ind_head" / "sel_copy"
 BATCH_SIZE=128
-TRAIN_ITERS=2 # 100
+TRAIN_ITERS=1000 # 1000 / 2
 LR=1e-3 # 1e-3 / 7e-4
-EVAL_EVERY=1 # 20
-SAVE_EVERY=1 # 50
+LOG_EVERY=10 # 10 / 1
+EVAL_EVERY=50 # 50 / 1
+SAVE_EVERY=250 # 250 / 1
 NUM_LAYERS=2
 NUM_HEADS=4
 RNN_TYPE="mingru"
@@ -65,6 +66,7 @@ singularity exec --nv \
     --train_iters $TRAIN_ITERS \
     --lr $LR \
     --eval_samples $((10 * BATCH_SIZE)) \
+    --log_every $LOG_EVERY \
     --eval_every $EVAL_EVERY \
     --save_every $SAVE_EVERY \
     --save_dir $OUTPUT_DIR \

@@ -244,7 +244,7 @@ def main(args):
             running_loss += loss.item()
             running_loss /= (step+1)
 
-        if (step+1) % 1 == 0:
+        if (step+1) % args.log_every == 0:
             torch.cuda.synchronize()
             peak_allocated_gb = torch.cuda.max_memory_allocated(device) / 1024**3
             peak_reserved_gb = torch.cuda.max_memory_reserved(device) / 1024**3
@@ -296,6 +296,7 @@ if __name__ == "__main__":
     # Training
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--train_iters", type=int, default=100, help="Steps per epoch.")
+    parser.add_argument("--log_every", type=int, default=10)
     parser.add_argument("--eval_samples", type=int, default=40)
     parser.add_argument("--eval_every", type=int, default=50)
     parser.add_argument("--save_every", type=int, default=100)
