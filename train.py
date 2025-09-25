@@ -168,7 +168,11 @@ def main(args):
     # Setup wandb
     if rank == 0:
         dist_utils.print0(f"Loading wandb config file: {args.wandb_config}")
-        run_name = f"{args.synth_task}-{args.dataset_name}-{args.rnn_type}-b{global_batch_size}-lr{args.lr}-{int(args.train_iters//1000)}k"
+        run_name = f"{args.synth_task}-{args.dataset_name}-{args.rnn_type}-ly{args.num_layers}-b{global_batch_size}-lr{args.lr}-{int(args.train_iters//1000)}k"
+        if args.fixed_head > -1:
+            run_name = f"fixed{args.fixed_head}-{run_name}"
+        if args.seq_len > -1:
+            run_name = f"seq{args.seq_len}-{run_name}"
         with open(args.wandb_config) as f:
             wandb_config = json.load(f)
         setup_wandb(config=vars(args), wandb_config=wandb_config, run_name=run_name, mode="offline")
@@ -200,11 +204,12 @@ def main(args):
     # Dataset+Dataloader
     dist_utils.print0("Setting up dataset + dataloader... ")
     if args.synth_task == 'ind_head':
-        seq_len = 256
+        seq_len = 256 if args.seq_len == -1 else args.seq_len
         dataset = InductionHeadDataset(rank=rank, dataset_name=args.dataset_name, seq_len=seq_len, 
-                                       seed=args.seed+rank, root=args.dataset_root)
+                                       seed=args.seed+rank, root=args.dataset_root, fixed_head=args.fixed_head
+                                       )
     elif args.synth_task == 'sel_copy':
-        seq_len = 4096
+        seq_len = 4096 if args.seq_len == -1 else args.seq_len
         dataset = SelectiveCopyDataset(rank=rank, dataset_name=args.dataset_name, seq_len=seq_len, 
                                        seed=args.seed+rank, root=args.dataset_root, use_latent=True, vae=vae)
     else:
@@ -303,6 +308,10 @@ if __name__ == "__main__":
 
     # W&B
     parser.add_argument("--wandb_config", type=str, default=None)
+
+    # Debug fixed_head, seq_len
+    parser.add_argument("--fixed_head", type=int, default=-1)
+    parser.add_argument("--seq_len", type=int, default=-1)
 
     args = parser.parse_args()
     main(args)

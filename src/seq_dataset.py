@@ -94,11 +94,17 @@ class InductionHeadDataset(BaseImageSequenceDataset):
             dataset_name="mnist", 
             root="/ubc/cs/research/plai-scratch/chsu35/datasets", 
             seq_len=256, 
-            seed=None
+            seed=None,
+            fixed_head=-1
         ):
         super().__init__(rank, dataset_name, root, seed)
         self.L = seq_len
         self.special_token = torch.ones(self.C, self.H, self.W)
+        self.fixed_head = fixed_head
+
+        if self.fixed_head > -1:
+            print(f"[InductionHeadDataset] Debugging with fixed_head: {fixed_head}.")
+        print(f"[InductionHeadDataset] Sequence length: {seq_len}.")
 
     def __getitem__(self, idx):
         L, N = self.L, self.N
@@ -120,7 +126,11 @@ class InductionHeadDataset(BaseImageSequenceDataset):
                 seq[mask] = torch.stack([self.class_images[i][img_idx] for img_idx in img_indices[mask]])
 
         # Special token positions
-        induct_head = torch.randint(0, L - 2, (1,), generator=self.rng).item()
+        if self.fixed_head == -1:
+            induct_head = torch.randint(0, L - 2, (1,), generator=self.rng).item()
+        else:
+            induct_head = self.fixed_head # debug
+
         seq[induct_head] = self.special_token
         seq[L - 1] = self.special_token
         seq_label = labels[induct_head + 1].clone()

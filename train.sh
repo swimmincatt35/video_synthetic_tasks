@@ -1,8 +1,8 @@
 #!/bin/bash
 #SBATCH --job-name=train_rnn
 #SBATCH --nodes=1
-#SBATCH --ntasks=4          
-#SBATCH --gres=gpu:4       
+#SBATCH --ntasks=2          
+#SBATCH --gres=gpu:2       
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=64G  
 #SBATCH --time=12:00:00
@@ -37,16 +37,22 @@ DATASET="mnist" # "cifar10" / "mnist"
 VAE_PATH="/ubc/cs/research/plai-scratch/chsu35/vae-runs/vae-mnist-lr0.001-b128-kld0.0001/checkpoints/vae_epoch_300.pt"
 # VAE_PATH="/ubc/cs/research/plai-scratch/chsu35/vae-runs/vae-cifar10-lr0.001-b128-kld0.0001/checkpoints/vae_epoch_300.pt"
 SYNTH_TASK="ind_head" # "ind_head" / "sel_copy"
-BATCH_SIZE=128
-TRAIN_ITERS=2000 # 1000 / 2
-LR=1e-3 # 1e-3 / 7e-4
-LOG_EVERY=10 # 10 / 1
-EVAL_EVERY=50 # 50 / 1
-SAVE_EVERY=250 # 250 / 1
-NUM_LAYERS=2
+BATCH_SIZE=8 # 128 / 8 
+TRAIN_ITERS=40000 # 1000 / 2
+# The mamba paper trained mamba for 25 epochs, each epoch is 8192 steps, batch size 8. 
+# And other baselines were trained for 50 epochs.
+LR=1e-4 # 1e-4 / 1e-5 / 5e-4
+LOG_EVERY=20 # 10 / 1
+EVAL_EVERY=100 # 50 / 1
+SAVE_EVERY=20000 # 250 / 1
+NUM_LAYERS=4 # 2 / 4
 NUM_HEADS=4
 RNN_TYPE="mingru"
 WANDB_CONF="/ubc/cs/research/fwood/chsu35/video_synthetic_tasks/configs/wandb_config.json"
+
+# --------- Debugging ---------
+FIXED_HEAD=100 # -1 / 252 / 200 / 100
+SEQ_LEN=-1 # -1 / 128 / 64 / 32 / 16 / 8
 
 nvidia-smi
 
@@ -70,7 +76,9 @@ singularity exec --nv \
     --eval_every $EVAL_EVERY \
     --save_every $SAVE_EVERY \
     --save_dir $OUTPUT_DIR \
-    --wandb_config $WANDB_CONF 
+    --wandb_config $WANDB_CONF \
+    --fixed_head $FIXED_HEAD \
+    --seq_len $SEQ_LEN
 
 
 # UBC / Compute Canada Slurm
