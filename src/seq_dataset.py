@@ -23,7 +23,7 @@ class BaseImageSequenceDataset(Dataset, ABC):
         Base class for sequence datasets based on MNIST/CIFAR10.
         Handles loading, downloading, and caching images per class.
         """
-        self.dataset_name = dataset_name.upper()
+        self.dataset_name = dataset_name
         self.seed = seed
 
         if self.dataset_name == "mnist":
@@ -42,15 +42,11 @@ class BaseImageSequenceDataset(Dataset, ABC):
 
         # ---- Download with rank 0, sync others ----
         if rank == 0:
-            print(f"[Rank {rank}] creating")
             os.makedirs(dataset_dir, exist_ok=True)
             self.base_dataset = self._get_dataset(dataset_dir, transform, download=True)
-        print(f"[Rank {rank}] waiting")
         dist.barrier(device_ids=[rank])
-        print(f"[Rank {rank}] passed")
         
         if rank != 0:
-            print(f"[Rank {rank}] verifying")
             self.base_dataset = self._get_dataset(dataset_dir, transform, download=False)
 
         # Cache all images per class
@@ -83,7 +79,7 @@ class BaseImageSequenceDataset(Dataset, ABC):
 
     def __len__(self):
         #return 2**31 - 1   # arbitrary large size.
-        return 50
+        return 10000
 
     @abstractmethod
     def __getitem__(self, idx):
@@ -92,7 +88,14 @@ class BaseImageSequenceDataset(Dataset, ABC):
 
 
 class InductionHeadDataset(BaseImageSequenceDataset):
-    def __init__(self, rank, dataset_name="mnist", root="/ubc/cs/research/plai-scratch/chsu35/datasets", seq_len=256, seed=None):
+    def __init__(
+            self, 
+            rank, 
+            dataset_name="mnist", 
+            root="/ubc/cs/research/plai-scratch/chsu35/datasets", 
+            seq_len=256, 
+            seed=None
+        ):
         super().__init__(rank, dataset_name, root, seed)
         self.L = seq_len
         self.special_token = torch.ones(self.C, self.H, self.W)
@@ -124,11 +127,37 @@ class InductionHeadDataset(BaseImageSequenceDataset):
 
         return seq, seq_label
 
-
 class SelectiveCopyDataset(BaseImageSequenceDataset):
-    def __init__(self, rank, dataset_name="mnist", root="/ubc/cs/research/plai-scratch/chsu35/datasets", seq_len=4096, seed=42):
+    def __init__(
+        self,
+        rank,
+        dataset_name="mnist",
+        root="/ubc/cs/research/plai-scratch/chsu35/datasets",
+        seq_len=4096,
+        seed=42,
+        vae=None,
+        use_latent=False,
+    ):
         super().__init__(rank, dataset_name, root, seed)
         self.L = seq_len
+        self.use_latent = use_latent  # <-- renamed for clarity
+        self.device = torch.device(f"cuda:{rank}")
+
+        if self.use_latent:
+            if vae is None:
+                raise ValueError("[ERROR] use_latent=True but no VAE provided!")
+            self.vae = vae.to(self.device).eval()
+            with torch.no_grad():
+                # Precompute black latent ONCE and store it
+                C, H, W = self.C, self.H, self.W
+                black_frame = torch.zeros(1, C, H, W, device=self.device)
+                self.black_latent, _ = self.vae.encoder(black_frame)
+        else:
+            self.vae = None
+            self.black_latent = None
+
+    def is_latent_mode(self):
+        return self.use_latent
 
     def __getitem__(self, idx):
         L, N, C, H, W = self.L, self.N, self.C, self.H, self.W
@@ -147,9 +176,20 @@ class SelectiveCopyDataset(BaseImageSequenceDataset):
             self.class_images[k][batch_indices[k]] for k in range(N)
         ])
 
-        video = torch.zeros(L, C, H, W)
-        video[positions] = batch_digits
-        return video, labels
+        if self.use_latent:
+            with torch.no_grad():
+                batch_digits = batch_digits.to(self.device)
+                mu, _ = self.vae.encoder(batch_digits)  # [N, latent_dim]
+                mu = mu.view(N, -1)  
+                black_latent_flat = self.black_latent.view(1, -1)
+                latent_video = black_latent_flat.expand(L, -1).clone()
+                latent_video[positions] = mu
+            return latent_video.cpu(), labels
+
+        else:
+            video = torch.zeros(L, C, H, W)
+            video[positions] = batch_digits
+            return video, labels
 
 
 if __name__ == "__main__":
@@ -215,11 +255,11 @@ if __name__ == "__main__":
         for i in range(args.num_steps):
             batch = next(inf_dataloader)
             videos, labels = batch
-            print(f"[Rank {rank}] Step {i+1}/{args.num_steps} - videos.shape = {videos.shape}, labels.shape = {labels.shape}, labels = {labels}")
+            print(f"Step {i+1}/{args.num_steps} - videos.shape = {videos.shape}, labels.shape = {labels.shape}, labels = {labels}")
         
         end = time.time()
-        print(f"[Rank {rank}] Time for {args.num_steps} steps: {end - start:.4f} seconds")
-        print(f"[Rank {rank}] Avg step time: {(end - start) / args.num_steps:.6f} seconds")
+        print(f"Time for {args.num_steps} steps: {end - start:.4f} seconds")
+        print(f"Avg step time: {(end - start) / args.num_steps:.6f} seconds")
 
     # Parse command line arguments
     args = parse_args()
@@ -230,7 +270,6 @@ if __name__ == "__main__":
         elif args.dataset_type=="induction":
             args.seq_len = 256
     
-    print(f"Running with arguments:")
     print(f"  Seed: {args.seed}")
     print(f"  Dataset: {args.dataset}")
     print(f"  Dataset type: {args.dataset_type}")

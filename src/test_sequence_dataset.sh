@@ -29,7 +29,6 @@ PORT=$((10000 + RANDOM % 50000))
 # Define paths to bind
 PROJECT="/project/def-fwood/chsuae/video_synthetic_tasks"
 DATASET_ROOT="/scratch/chsuae/datasets"
-
 # PROJECT="/ubc/cs/research/fwood/chsu35/video_synthetic_tasks"
 # DATASET_ROOT="/ubc/cs/research/plai-scratch/chsu35/datasets"
 

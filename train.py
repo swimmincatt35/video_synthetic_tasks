@@ -6,6 +6,7 @@ import argparse
 import wandb
 import os
 import sys
+import json
 
 # Add 'src' to Python path
 src_path = os.path.join(os.path.dirname(__file__), "src")
@@ -20,15 +21,44 @@ import torch.multiprocessing as mp
 from torch.utils.data import DataLoader, DistributedSampler
 
 from models.encoders import RecurrentEncoder
-from seq_dataset import InductionHeadDataset, SelectiveCopyDataset 
+from seq_dataset import InductionHeadDataset, SelectiveCopyDataset, infinite_dataloader 
 from vae.vae import ConvVAE
+import dist_utils
+
+
+def setup_wandb(config: dict, wandb_config: dict, run_name: str = None, mode: str = None):
+    """
+    Initializes wandb with automatic offline fallback if internet is unavailable.
+    """
+    if mode is None:
+        try:
+            socket.create_connection(("api.wandb.ai", 443), timeout=3)
+            mode = "online"
+        except OSError:
+            dist_utils.print0("[INFO] No internet detected: running wandb in offline mode.")
+            mode = "offline"
+    os.environ["WANDB_MODE"] = mode 
+    wandb.login(key=wandb_config["api_key"])
+    wandb.init(
+        project=wandb_config["project"],
+        entity=wandb_config["entity"],  
+        name=run_name,
+        mode=mode,  # redundant but explicit
+        config=config
+    )
+    dist_utils.print0(f"[INFO] wandb initialized in {mode} mode. Run URL: {wandb.run.get_url() if wandb.run else 'N/A'}.")
 
 
 def setup_distributed():
+    """
+    Initialize a distributed training environment using NCCL backend.
+    Configures a custom global `print()` that prefixes messages with the process rank.
+    """
     rank = int(os.environ['RANK'])
     world_size = int(os.environ['WORLD_SIZE'])
     torch.cuda.set_device(rank)
     dist.init_process_group(backend='nccl', rank=rank, world_size=world_size)
+    dist_utils.setup_rank_print(rank)
     return rank, world_size
 
 
@@ -36,65 +66,64 @@ def cleanup_distributed():
     dist.destroy_process_group()
 
 
-def train_step(args, model, optimizer, videos, labels, device, rank):
+def train_step(args, model, optimizer, latents, labels, criterion, device, rank):
     model.train()
-    print(f"[Rank {rank}] ts1")
-    videos, labels = videos.to(device), labels.to(device) 
-    print(f"[Rank {rank}] ts2")
     optimizer.zero_grad()
-    print(f"[Rank {rank}] ts3")
-    initial_states = model.get_initial_recurrent_state(videos.shape[0], device)
-    print(f"[Rank {rank} videos.shape {videos.shape}, labels.shape {labels.shape}, labels {labels}]")
-    logits = model(videos, initial_states)  #  [B,rollout,n_classes]
-    print(f"[Rank {rank}] ts4")
-    logits = logits.reshape(-1, logits.size(-1))  # [B*rollout,n_classes]
-    
+    initial_states = model.module.get_initial_recurrent_state(latents.shape[0], device)
+    logits = model(latents, initial_states) 
+    B, R, n_classes = logits.shape
+    logits = logits.view(B * R, n_classes)           
     if args.synth_task=='sel_copy':
-        labels = labels.reshape(-1)  # [B*rollout]
-
+        labels = labels.view(B * R)    
     loss = criterion(logits, labels)
-    print(f"[Rank {rank}] ts5")
     loss.backward()
-    print(f"[Rank {rank}] ts6")
     optimizer.step()
-    print(f"[Rank {rank}] ts7")
-
     return loss
 
 
 @torch.no_grad()
-def evaluate(args, model, dataloader, criterion, device):
+def evaluate(args, model, inf_dataloader, criterion, vae, device):
     model.eval()
-    total_loss, logit_correct, total_logits = 0.0, 0, 0
+    total_loss, logit_correct, total_logits = 0.0, 0, 0    
+    batch_correct = 0
+    total_batches = 0
 
-    if args.synth_task:
-        batch_correct = 0
-        total_batches = 0
+    step = 0
+    while step * args.batch_size < args.eval_samples:
 
-    for step, (videos, labels) in enumerate(dataloader):
-        if step * args.batch_size >= args.eval_samples:
-            break
+        videos, labels = next(inf_dataloader) 
+        videos, labels = videos.to(device), labels.to(device) 
+        if args.synth_task == "ind_head":
+            B, L, C, H, W = videos.shape 
+            videos = videos.view(B*L, C, H, W)  
+            with torch.no_grad():
+                latents, _ = vae.encoder(videos)  
+            latents = latents.view(B, L, -1)
+        else:
+            assert dataset.is_latent_mode()
+            latents = videos
 
-        videos, labels = videos.to(device), labels.to(device)
-        initial_states = model.module.get_initial_recurrent_state(videos.shape[0], device)
-        logits = model(videos, initial_states)
-
+        initial_states = model.module.get_initial_recurrent_state(latents.shape[0], device)
+        logits = model(latents, initial_states)
+        B, R, n_classes = logits.shape
+        logits = logits.view(B * R, n_classes)           
         if args.synth_task=='sel_copy':
-            labels = labels.reshape(-1)  # [B*rollout]
+            labels = labels.view(B * R)    
 
         loss = criterion(logits, labels)
         total_loss += loss.item()
-
         preds = torch.argmax(logits, dim=-1)
         logit_correct += (preds == labels).sum().item()
         total_logits += labels.numel()
 
         if args.synth_task=='sel_copy':
             # Per-sample correctness: only count as correct if *all* predictions are correct
-            batch_result = (preds == labels).reshape(videos.shape[0], -1).all(dim=1)
+            batch_result = (preds == labels).reshape(latents.shape[0], -1).all(dim=1)
             batch_correct += batch_result.sum().item()
-            total_batches += videos.shape[0]
-    
+            total_batches += latents.shape[0]
+        
+        step+=1
+
     # Convert to tensors for reduction
     total_loss_tensor = torch.tensor(total_loss, device=device)
     logit_correct_tensor = torch.tensor(logit_correct, device=device)
@@ -112,10 +141,17 @@ def evaluate(args, model, dataloader, criterion, device):
     accuracy = logit_correct_tensor.item() / total_logits_tensor.item()
     batch_accuracy = (
         batch_correct_tensor.item() / total_batches_tensor.item()
-        if total_batches_tensor.item() > 0 else None
+        if total_batches_tensor.item() > 0 else 0
     )
-
     return avg_loss, accuracy, batch_accuracy
+
+
+def load_vae_checkpoint(model, path, device):
+    if os.path.isfile(path):
+        checkpoint = torch.load(path, map_location=device)
+        model.load_state_dict(checkpoint["model_state"])
+    else:
+        raise FileNotFoundError(f"[ERROR] No checkpoint found at {path}")
 
 
 # --------------------------
@@ -125,97 +161,114 @@ def main(args):
     rank, world_size = setup_distributed()
     device = torch.device(f"cuda:{rank}")
 
-    # W&B init (only on rank 0)
+    assert args.batch_size % world_size == 0
+    global_batch_size = args.batch_size
+    batch_size = args.batch_size // world_size
+
+    # Setup wandb
     if rank == 0:
-        wandb.init(project=args.project, config=vars(args), name=args.run_name)
+        dist_utils.print0(f"Loading wandb config file: {args.wandb_config}")
+        run_name = f"{args.synth_task}-{args.dataset_name}-{args.rnn_type}-b{global_batch_size}-lr{args.lr}-{int(args.train_iters//1000)}k"
+        with open(args.wandb_config) as f:
+            wandb_config = json.load(f)
+        setup_wandb(config=vars(args), wandb_config=wandb_config, run_name=run_name, mode="offline")
+    dist_utils.print0(f"Training configs: {vars(args)}")
 
-    # Dataset + Dataloader
-    if args.synth_task == 'ind_head':
-        print(f"[Rank {rank}] ind_head")
-        dataset = InductionHeadDataset(rank=rank, dataset_name=args.dataset_name, L=args.seq_length, seed=args.seed+rank, root=args.dataset_dir)
-        print(f"[Rank {rank}] ind_head done")
-        
-    elif args.synth_task.upper() == 'sel_copy':
-        print(f"[Rank {rank}] sel_copy")
-        dataset = SelectiveCopyDataset(rank=rank, dataset_name=args.dataset_name, L=args.seq_length, seed=args.seed+rank, root=args.dataset_dir)
-        print(f"[Rank {rank}] sel_copy done")
-
-    else:
-        raise ValueError(f"Unknown synthetic task {args.synth_task}")
-    
-    print(f"[Rank {rank}] hi1")
-    sampler = DistributedSampler(dataset)
-
-    print(f"[Rank {rank}] hi2")
-    assert args.batch_size%world_size==0
-    dataloader = DataLoader(dataset, batch_size=args.batch_size//world_size, sampler=sampler, num_workers=0, pin_memory=True)
-    print(f"[Rank {rank}] hi3")
-
-    # Model, vae, optimizer, criterion
+    # Model+ddp
+    latent_dim = 4*7*7 if args.dataset_name=="mnist" else 4*8*8
     model = RecurrentEncoder(
-        output_dim=args.output_dim,
+        output_dim=latent_dim,
         num_layers=args.num_layers,
         num_heads=args.num_heads,
         rnn_type=args.rnn_type,
         is_video_synth_task=True,
         video_synth_task_out_dim=10
     ).to(device)
+    dist_utils.print0("Setting up ddp... ")
+    ddp = torch.nn.parallel.DistributedDataParallel(model, device_ids=[rank])
 
+    # VAE
     if args.dataset_name=="mnist":
         in_ch = out_ch = 1
     elif args.dataset_name=="cifar10":
         in_ch = out_ch = 3
+    dist_utils.print0("Setting up vae... ")
     vae = ConvVAE(in_ch=in_ch, out_ch=out_ch, latent_ch=4, base_ch=32).to(device)
+    load_vae_checkpoint(vae, args.vae_path, device)
     vae.eval() 
 
-    print(f"[Rank {rank}] hi4")
-    ddp = torch.nn.parallel.DistributedDataParallel(model, device_ids=[rank])
-    print(f"[Rank {rank}] hi5")
-    optimizer = optim.AdamW(ddp.parameters(), lr=args.lr)
-    print(f"[Rank {rank}] hi6")
-    criterion = nn.CrossEntropyLoss()
+    # Dataset+Dataloader
+    dist_utils.print0("Setting up dataset + dataloader... ")
+    if args.synth_task == 'ind_head':
+        seq_len = 256
+        dataset = InductionHeadDataset(rank=rank, dataset_name=args.dataset_name, seq_len=seq_len, 
+                                       seed=args.seed+rank, root=args.dataset_root)
+    elif args.synth_task == 'sel_copy':
+        seq_len = 4096
+        dataset = SelectiveCopyDataset(rank=rank, dataset_name=args.dataset_name, seq_len=seq_len, 
+                                       seed=args.seed+rank, root=args.dataset_root, use_latent=True, vae=vae)
+    else:
+        raise ValueError(f"Unknown synthetic task {args.synth_task}")
+    inf_dataloader = infinite_dataloader(
+        DataLoader(dataset, batch_size=batch_size, num_workers=0, pin_memory=True)
+    )
 
+    # Optimizer
+    optimizer = optim.AdamW(ddp.parameters(), lr=args.lr)
+
+    # Loss
+    criterion = nn.CrossEntropyLoss()
     if rank == 0:
         running_loss = 0.0
-    print(f"[Rank {rank}] hi7")
 
-    data_iter = iter(dataloader)
+    # Train
+    dist_utils.print0("Training... ")
     for step in range(args.train_iters):    
-        videos, labels = next(data_iter) 
-    
-        print(f"[Rank {rank}] hi8")
-        print(videos.shape)
-        print(labels.shape)
-        videos = videos.reshape(videos.size(0), videos.size(1), -1) # flatten
+        videos, labels = next(inf_dataloader) 
+        videos, labels = videos.to(device), labels.to(device) 
 
-        exit(0)
-        with torch.no_grad():  
-            mu, _ = vae.encode(x)
-        
-        print(f"[Rank {rank}] hi9")
-        loss = train_step(args, ddp, optimizer, videos, labels, device, rank)
-        print(f"[Rank {rank}] hi10")
+        if args.synth_task == "ind_head":
+            B, L, C, H, W = videos.shape 
+            #print(videos.shape) # [B, L, 3, H, W]
+            #print(labels.shape) # [B] 
+            videos = videos.view(B*L, C, H, W)  # [B*L, 3, H, W]
+            with torch.no_grad():
+                latents, _ = vae.encoder(videos)  # [B*L, latent_dim]
+            latents = latents.view(B, L, -1)
+        else:
+            assert dataset.is_latent_mode()
+            latents = videos
+        loss = train_step(args, ddp, optimizer, latents, labels, criterion, device, rank)
+
         if rank == 0:
             running_loss += loss.item()
             running_loss /= (step+1)
 
-        if (step+1) % 100 == 0 and rank == 0:
-            print(f"[Step {step+1}] Running train Loss: {running_loss:.4f}")  
-            if wandb_logger: 
-                wandb_logger.log({"train/loss": loss.item()}, step=step+1)
+        if (step+1) % 1 == 0:
+            torch.cuda.synchronize()
+            peak_allocated_gb = torch.cuda.max_memory_allocated(device) / 1024**3
+            peak_reserved_gb = torch.cuda.max_memory_reserved(device) / 1024**3
+            dist_utils.print0(f"[Step {step+1}] Peak Allocated: {peak_allocated_gb:.2f} GB | Peak Reserved: {peak_reserved_gb:.2f} GB")
+            torch.cuda.reset_peak_memory_stats(device)
+            if rank==0:
+                dist_utils.print0(f"[Step {step+1}] Running train Loss: {running_loss:.4f}") 
+                wandb.log({"train/loss": loss.item(),}, step=step+1) 
         
         if (step+1) % args.eval_every == 0:
-            eval_loss, eval_acc, eval_batch_acc = evaluate(args, ddp, dataloader, criterion, device)
+            dist_utils.print0("Evaluating... ")
+            eval_loss, eval_acc, eval_batch_acc = evaluate(args, ddp, inf_dataloader, criterion, vae, device)
             if rank == 0:
-                print(f"[Step {step+1}] Eval Loss: {eval_loss:.4f}, Eval Acc: {eval_acc:.4f}, Eval Batch Acc: {eval_batch_acc:.4f}")
+                dist_utils.print0(f"[Step {step+1}] Eval Loss: {eval_loss:.4f}, Eval Acc: {eval_acc:.4f}, Eval Batch Acc: {eval_batch_acc:.4f}")
                 wandb.log({"eval/loss": eval_loss, "eval/acc": eval_acc, "eval/batch_acc": eval_batch_acc}, step=step+1)
 
         if (step+1) % args.save_every == 0 and rank == 0:
-            ckpt_path = os.path.join(args.save_dir, f"checkpoint_epoch{step+1}.pt")
-            os.makedirs(args.save_dir, exist_ok=True)
+            save_dir = os.path.join(args.save_dir, run_name)
+            os.makedirs(save_dir, exist_ok=True)
+            ckpt_path = os.path.join(save_dir, f"ckpt_{step+1}.pt")
             torch.save(ddp.module.state_dict(), ckpt_path)
-            print(f"[Rank 0] Saved checkpoint to {ckpt_path}")
-
+            dist_utils.print0(f"Saved checkpoint to {ckpt_path}")
+        
+    dist_utils.print0("Done...")
     cleanup_distributed()
 
 
@@ -226,31 +279,30 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Distributed Training Template with W&B")
 
     # Model hyperparams
-    parser.add_argument("--output_dim", type=int, default=128)
     parser.add_argument("--num_layers", type=int, default=2)
     parser.add_argument("--num_heads", type=int, default=4)
     parser.add_argument("--rnn_type", type=str, default="mingru")
 
+    # VAE
+    parser.add_argument("--vae_path", type=str, required=True, help="Path to vae.")
+
     # Dataset
-    parser.add_argument("--synth_task", type=str, default="ind_head", help="ind_head | sel_copy")
-    parser.add_argument("--dataset_dir", type=str, default="/ubc/cs/research/plai-scratch/chsu35/datasets", help="root directory for dataset, normally in scratch")
+    parser.add_argument("--dataset_root", type=str, default="/ubc/cs/research/plai-scratch/chsu35/datasets", help="Root directory for dataset, normally in scratch.")
     parser.add_argument("--dataset_name", type=str, default="cifar10", choices=["mnist", "cifar10"])
-    parser.add_argument("--seq_length", type=int, default=256)
+    parser.add_argument("--synth_task", type=str, default="ind_head", choices=["ind_head", "sel_copy"])
     parser.add_argument("--batch_size", type=int, default=16)
     parser.add_argument("--seed", type=int, default=42)
 
     # Training
-    parser.add_argument("--epochs", type=int, default=10)
     parser.add_argument("--lr", type=float, default=1e-3)
-    parser.add_argument("--train_iters", type=int, default=100, help="steps per epoch")
+    parser.add_argument("--train_iters", type=int, default=100, help="Steps per epoch.")
     parser.add_argument("--eval_samples", type=int, default=40)
     parser.add_argument("--eval_every", type=int, default=50)
     parser.add_argument("--save_every", type=int, default=100)
-    parser.add_argument("--save_dir", type=str, default="./checkpoints")
+    parser.add_argument("--save_dir", type=str, default="./rnn-runs")
 
     # W&B
-    parser.add_argument("--project", type=str, default="minGRU-toy-run")
-    parser.add_argument("--run_name", type=str, default="experiment-1")
+    parser.add_argument("--wandb_config", type=str, default=None)
 
     args = parser.parse_args()
     main(args)
