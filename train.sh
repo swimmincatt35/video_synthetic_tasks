@@ -1,64 +1,66 @@
 #!/bin/bash
-#SBATCH --job-name=train_rnn
-#SBATCH --nodes=1
-#SBATCH --ntasks=2          
-#SBATCH --gres=gpu:2       
+#SBATCH --job-name=train_run
+#SBATCH --account=rrg-fwood
+#SBATCH --nodes=2
+#SBATCH --ntasks=2
+#SBATCH --gpus=a100:2
+#SBATCH --partition=gpubase_bygpu_b1
 #SBATCH --cpus-per-task=4
-#SBATCH --mem=64G  
-#SBATCH --time=12:00:00
-#SBATCH --partition=plai
-#SBATCH --output=logs/%x_%j.out    
-#SBATCH --error=logs/%x_%j.err   
+#SBATCH --mem=256G
+#SBATCH --time=2:00:00
+#SBATCH --output=logs/%x_%j.out
+#SBATCH --error=logs/%x_%j.err
 
-# module load apptainer/1.2.4 
+module load apptainer/1.2.4 
 
 # --------- Multi gpu training ---------
 PORT=$((10000 + RANDOM % 50000))
 
 # --------- Image ---------
-# SIF_PATH="/project/def-fwood/chsuae/singularity/ubc_env.sif"
-SIF_PATH="/ubc/cs/research/plai-scratch/chsu35/singularity_setup/video_synth_tasks/ubc_env.sif"
+SIF_PATH="/project/def-fwood/chsuae/singularity/ubc_env.sif"
+# SIF_PATH="/ubc/cs/research/plai-scratch/chsu35/singularity_setup/video_synth_tasks/ubc_env.sif"
 
 # --------- Define paths to bind ---------
-# PROJECT="/project/def-fwood/chsuae/video_synthetic_tasks"
-# DATASET_ROOT="/scratch/chsuae/datasets"
-# OUTPUT_DIR=...
-PROJECT="/ubc/cs/research/fwood/chsu35/video_synthetic_tasks"
-DATASET_ROOT="/ubc/cs/research/plai-scratch/chsu35/datasets"
-OUTPUT_DIR="/ubc/cs/research/plai-scratch/chsu35/rnn-runs"
-CKPT_DIR="/ubc/cs/research/plai-scratch/chsu35/vae-runs/"
+PROJECT="/project/def-fwood/chsuae/video_synthetic_tasks"
+DATASET_ROOT="/scratch/chsuae/datasets"
+OUTPUT_DIR="/scratch/chsuae/rnn-runs"
+CKPT_DIR="/scratch/chsuae/vae-runs"
+# PROJECT="/ubc/cs/research/fwood/chsu35/video_synthetic_tasks"
+# DATASET_ROOT="/ubc/cs/research/plai-scratch/chsu35/datasets"
+# OUTPUT_DIR="/ubc/cs/research/plai-scratch/chsu35/rnn-runs"
+# CKPT_DIR="/ubc/cs/research/plai-scratch/chsu35/vae-runs"
 
 # --------- Issue selective_scan_interface.py line#20 ---------
-HOST_PATH="/ubc/cs/research/fwood/chsu35/video_synthetic_tasks/src/selective_scan_interface.py"
+HOST_PATH="${PROJECT}/src/selective_scan_interface.py"
 CONTAINER_PATH="/usr/local/lib/python3.10/dist-packages/mamba_ssm/ops/selective_scan_interface.py"
 
 # --------- Hyperparameters ---------
-DATASET="mnist" # "cifar10" / "mnist"
-VAE_PATH="/ubc/cs/research/plai-scratch/chsu35/vae-runs/vae-mnist-lr0.001-b128-kld0.0001/checkpoints/vae_epoch_300.pt"
-# VAE_PATH="/ubc/cs/research/plai-scratch/chsu35/vae-runs/vae-cifar10-lr0.001-b128-kld0.0001/checkpoints/vae_epoch_300.pt"
+DATASET="cifar10" # "cifar10" / "mnist"
+# VAE_PATH="${CKPT_DIR}/vae-mnist-lr0.001-b128-kld0.0001/checkpoints/vae_epoch_300.pt"
+VAE_PATH="${CKPT_DIR}/vae-cifar10-lr0.001-b128-kld0.0001/checkpoints/vae_epoch_300.pt"
 SYNTH_TASK="ind_head" # "ind_head" / "sel_copy"
-BATCH_SIZE=8 # 128 / 8 
-TRAIN_ITERS=40000 # 1000 / 2
-# The mamba paper trained mamba for 25 epochs, each epoch is 8192 steps, batch size 8. 
-# And other baselines were trained for 50 epochs.
+BATCH_SIZE=64 # 128 / 8 
+TRAIN_ITERS=1000000 # 1000 / 2
+# The mamba paper trained mamba for 25 epochs (8192 steps/epoch), batch size 8,     => 200000 iters
+# And other baselines were trained for 50 epochs (8192 steps/epoch), batch size 8,  => 400000 iters
 LR=1e-4 # 1e-4 / 1e-5 / 5e-4
-LOG_EVERY=20 # 10 / 1
-EVAL_EVERY=100 # 50 / 1
-SAVE_EVERY=20000 # 250 / 1
+LOG_EVERY=1000 # 10 / 1
+EVAL_EVERY=5000 # 50 / 1
+SAVE_EVERY=$((TRAIN_ITERS / 4)) # 250 / 1
 NUM_LAYERS=4 # 2 / 4
 NUM_HEADS=4
 RNN_TYPE="mingru"
-WANDB_CONF="/ubc/cs/research/fwood/chsu35/video_synthetic_tasks/configs/wandb_config.json"
+WANDB_CONF="${PROJECT}/configs/wandb_config.json"
 
 # --------- Debugging ---------
-FIXED_HEAD=100 # -1 / 252 / 200 / 100
-SEQ_LEN=-1 # -1 / 128 / 64 / 32 / 16 / 8
+FIXED_HEAD=-1 # -1 / 252(2K,B8) / 200 / 100
+SEQ_LEN=-1 # -1 / 128 / 64 / 32(30K,B8) / 16(8K,B8) / 8(2K,B8)
 
 nvidia-smi
 
 # --------- Run Training ----------
 echo "[INFO] Starting training job $SLURM_JOB_ID ..."
-singularity exec --nv \
+apptainer exec --nv \
     --bind ${HOST_PATH}:${CONTAINER_PATH} --bind ${PROJECT} --bind ${DATASET_ROOT} --bind ${OUTPUT_DIR} --bind ${CKPT_DIR} \
     ${SIF_PATH} torchrun --nproc_per_node=2 --rdzv_endpoint=localhost:$PORT train.py \
     --num_layers $NUM_LAYERS \
@@ -100,7 +102,7 @@ singularity exec --nv \
 #SBATCH --account=rrg-fwood
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --gpus=a100_40gb
+#SBATCH --gpus=a100
 #SBATCH --partition=gpubase_bygpu_b1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=256G
@@ -113,5 +115,6 @@ singularity exec --nv \
 # --gpus=a100_2g.10gb:2
 # --gpus=a100_3g.20gb:2
 # --gpus=a100_4g.20gb:2
-# --gpus=a100_40gb
+# --gpus=a100
 # --partition=gpubase_bygpu_b1
+# sinfo -o "%P %G %D %N" # to check for more
