@@ -239,10 +239,9 @@ def main(args):
             assert dataset.is_latent_mode()
             latents = videos
         loss = train_step(args, ddp, optimizer, latents, labels, criterion, device, rank)
-
+        
         if rank == 0:
-            running_loss += loss.item()
-            running_loss /= (step+1)
+            running_loss = (running_loss * step + loss.item()) / (step+1)
 
         if (step+1) % args.log_every == 0:
             torch.cuda.synchronize()

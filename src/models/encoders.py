@@ -310,8 +310,10 @@ class RecurrentEncoder(nn.Module):
                 x_last_element = x[:, -1, :] 
                 logits = self.post_MLP(x_last_element)
                 logits_rollout.append(logits)
+                # print(logits.shape) # [B, C]
 
             logits_rollout = torch.stack(logits_rollout, dim=1)
+            # print(logits_rollout.shape) # [B, rollout, C]
             return logits_rollout
 
         else:

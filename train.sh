@@ -1,8 +1,8 @@
 #!/bin/bash
 #SBATCH --job-name=train_rnn
 #SBATCH --nodes=1
-#SBATCH --ntasks=2          
-#SBATCH --gres=gpu:2       
+#SBATCH --ntasks=4          
+#SBATCH --gres=gpu:4       
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=64G  
 #SBATCH --time=12:00:00
