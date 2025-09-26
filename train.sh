@@ -9,8 +9,8 @@
 #SBATCH --output=logs/%x_%j.out    
 #SBATCH --error=logs/%x_%j.err   
 
-# module load apptainer/1.2.4 
-
+NUM_GPUS=4
+ 
 # --------- Multi gpu training ---------
 PORT=$((10000 + RANDOM % 50000))
 
@@ -66,7 +66,7 @@ nvidia-smi
 echo "[INFO] Starting training job $SLURM_JOB_ID ..."
 singularity exec --nv \
     --bind ${HOST_PATH}:${CONTAINER_PATH} --bind ${PROJECT} --bind ${DATASET_ROOT} --bind ${OUTPUT_DIR} --bind ${CKPT_DIR} --bind ${WANDB_DIR} \
-    ${SIF_PATH} torchrun --nproc_per_node=2 --rdzv_endpoint=localhost:$PORT train.py \
+    ${SIF_PATH} torchrun --nproc_per_node ${NUM_GPUS} --rdzv_endpoint=localhost:$PORT train.py \
     --num_layers $NUM_LAYERS \
     --num_heads $NUM_HEADS \
     --rnn_type $RNN_TYPE \

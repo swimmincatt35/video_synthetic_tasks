@@ -1,13 +1,15 @@
 #!/bin/bash
 #SBATCH --job-name=train_rnn-test
 #SBATCH --nodes=1
-#SBATCH --ntasks=4          
-#SBATCH --gres=gpu:4       
+#SBATCH --ntasks=8          
+#SBATCH --gres=gpu:8       
 #SBATCH --cpus-per-task=4
 #SBATCH --time=24:00:00
-#SBATCH --partition=plai
+#SBATCH --partition=ubcml
 #SBATCH --output=logs/%x_%j.out    
 #SBATCH --error=logs/%x_%j.err   
+
+NUM_GPUS=8
 
 # --------- Multi gpu testing ---------
 PORT=$((10000 + RANDOM % 50000))
@@ -41,7 +43,7 @@ nvidia-smi
 echo "[INFO] Starting testing job $SLURM_JOB_ID ..."
 singularity exec --nv \
     --bind ${HOST_PATH}:${CONTAINER_PATH} --bind ${PROJECT} --bind ${DATASET_ROOT} --bind ${VAE_CKPT_DIR} --bind ${RNN_CKPT_DIR} \
-    ${SIF_PATH} torchrun --nproc_per_node=2 test.py \
+    ${SIF_PATH} torchrun --nproc_per_node ${NUM_GPUS} test.py \
     --train_seq_len $TRAIN_SEQ_LEN \
     --rnn_ckpt_path $RNN_PATH \
     --rnn_type $RNN_TYPE \
