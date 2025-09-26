@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=train_rnn
+#SBATCH --job-name=train_sel_copy_rnn_short
 #SBATCH --nodes=1
 #SBATCH --ntasks=4          
 #SBATCH --gres=gpu:4       
@@ -36,23 +36,22 @@ CONTAINER_PATH="/usr/local/lib/python3.10/dist-packages/mamba_ssm/ops/selective_
 DATASET="mnist" # "cifar10" / "mnist"
 VAE_PATH="${CKPT_DIR}/vae-mnist-lr0.001-b128-kld0.0001/checkpoints/vae_epoch_300.pt"
 # VAE_PATH="${CKPT_DIR}/vae-cifar10-lr0.001-b128-kld0.0001/checkpoints/vae_epoch_300.pt"
-SYNTH_TASK="ind_head" # "ind_head" / "sel_copy"
-BATCH_SIZE=64 # 128 / 8 
-TRAIN_ITERS=1000000 # 1000 / 2
-# The mamba paper trained mamba for 25 epochs (8192 steps/epoch), batch size 8,     => 200000 iters
-# And other baselines were trained for 50 epochs (8192 steps/epoch), batch size 8,  => 400000 iters
-LR=1e-4 # 1e-4 / 1e-5 / 5e-4
-LOG_EVERY=1000 # 10 / 1
-EVAL_EVERY=5000 # 50 / 1
-SAVE_EVERY=$((TRAIN_ITERS / 4)) # 250 / 1
+SYNTH_TASK="sel_copy" # "ind_head" / "sel_copy"
+BATCH_SIZE=64 
+TRAIN_ITERS=100000 # 1000000 / 100000
+LR=1e-4 
+# Mamba settings: B=64, training iters = 400000, lr=1e-4
+LOG_EVERY=100 # 1000 / 100
+EVAL_EVERY=500 # 5000 / 500
+SAVE_EVERY=$((TRAIN_ITERS / 5)) # 250 / 1
 NUM_LAYERS=4 # 2 / 4
 NUM_HEADS=4
 RNN_TYPE="mingru"
 WANDB_CONF="${PROJECT}/configs/wandb_config.json"
 
 # --------- Debugging ---------
-FIXED_HEAD=-1 # -1 / 252(2K,B8) / 200 / 100
-SEQ_LEN=32 # -1 / 128 / 64(30K,B64) / 32(30K,B8) (5K,B64) / 16(8K,B8) / 8(2K,B8)
+FIXED_HEAD=-1 
+SEQ_LEN=2048 # -1 / 4096 / 2048 / 1024 / 512 / 256
 
 nvidia-smi
 

@@ -265,13 +265,19 @@ def main(args):
             if rank == 0:
                 dist_utils.print0(f"[Step {step+1}] Eval Loss: {eval_loss:.4f}, Eval Acc: {eval_acc:.4f}, Eval Batch Acc: {eval_batch_acc:.4f}")
                 wandb.log({"eval/loss": eval_loss, "eval/acc": eval_acc, "eval/batch_acc": eval_batch_acc}, step=step+1)
-
-        if (step+1) % args.save_every == 0 and rank == 0:
+        
+        if (step + 1) % args.save_every == 0 and rank == 0:
             save_dir = os.path.join(args.save_dir, run_name)
             os.makedirs(save_dir, exist_ok=True)
+            # Save model
             ckpt_path = os.path.join(save_dir, f"ckpt_{step+1}.pt")
             torch.save(ddp.module.state_dict(), ckpt_path)
-            dist_utils.print0(f"Saved checkpoint to {ckpt_path}")
+            dist_utils.print0(f"Saved model checkpoint to {ckpt_path}")
+            # Save optimizer
+            opt_path = os.path.join(save_dir, f"optimizer_{step+1}.pt")
+            torch.save(optimizer.state_dict(), opt_path)
+            dist_utils.print0(f"Saved optimizer state to {opt_path}")
+
         
     dist_utils.print0("Done...")
     cleanup_distributed()
