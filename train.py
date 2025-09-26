@@ -99,8 +99,7 @@ def evaluate(args, model, inf_dataloader, criterion, vae, world_size, device):
             with torch.no_grad():
                 latents, _ = vae.encoder(videos)  
             latents = latents.view(B, L, -1)
-        else:
-            assert dataset.is_latent_mode()
+        else: # sel_copy in latent_mode
             latents = videos
 
         initial_states = model.module.get_initial_recurrent_state(latents.shape[0], device)
@@ -180,13 +179,15 @@ def main(args):
 
     # Model+ddp
     latent_dim = 4*7*7 if args.dataset_name=="mnist" else 4*8*8
+    synth_task_rollout_len = 10 if args.synth_task=="sel_copy" else 1
     model = RecurrentEncoder(
         output_dim=latent_dim,
         num_layers=args.num_layers,
         num_heads=args.num_heads,
         rnn_type=args.rnn_type,
         is_video_synth_task=True,
-        video_synth_task_out_dim=10
+        video_synth_task_out_dim=10,
+        synth_task_rollout_len=synth_task_rollout_len
     ).to(device)
     dist_utils.print0("Setting up ddp... ")
     ddp = torch.nn.parallel.DistributedDataParallel(model, device_ids=[rank])

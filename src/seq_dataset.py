@@ -165,6 +165,7 @@ class SelectiveCopyDataset(BaseImageSequenceDataset):
         else:
             self.vae = None
             self.black_latent = None
+        print(f"[SelectiveCopyDataset] Sequence length: {seq_len}.")
 
     def is_latent_mode(self):
         return self.use_latent
