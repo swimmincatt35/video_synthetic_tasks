@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=train_rnn
+#SBATCH --job-name=train_rnn-2
 #SBATCH --nodes=1
 #SBATCH --ntasks=4          
 #SBATCH --gres=gpu:4       
@@ -26,7 +26,7 @@ SIF_PATH="/ubc/cs/research/plai-scratch/chsu35/singularity_setup/video_synth_tas
 PROJECT="/ubc/cs/research/fwood/chsu35/video_synthetic_tasks"
 SCRATCH="/ubc/cs/research/plai-scratch/chsu35"
 DATASET_ROOT="${SCRATCH}/datasets"
-OUTPUT_DIR="${SCRATCH}/rnn-runs"
+OUTPUT_DIR="${SCRATCH}/rnn-runs-2"
 CKPT_DIR="${SCRATCH}/vae-runs"
 mkdir -p "$OUTPUT_DIR"
 
@@ -40,12 +40,12 @@ VAE_PATH="${CKPT_DIR}/vae-mnist-lr0.001-b128-kld0.0001/checkpoints/vae_epoch_300
 # VAE_PATH="${CKPT_DIR}/vae-cifar10-lr0.001-b128-kld0.0001/checkpoints/vae_epoch_300.pt"
 SYNTH_TASK="ind_head" # "ind_head" / "sel_copy"
 BATCH_SIZE=64 # 128 / 8 
-TRAIN_ITERS=1000000 # 1000 / 2
+TRAIN_ITERS=4 # 1000000 / 4
 # The mamba paper trained mamba for 25 epochs (8192 steps/epoch), batch size 8,     => 200000 iters
 # And other baselines were trained for 50 epochs (8192 steps/epoch), batch size 8,  => 400000 iters
 LR=1e-4 # 1e-4 / 1e-5 / 5e-4
-LOG_EVERY=1000 # 10 / 1
-EVAL_EVERY=5000 # 50 / 1
+LOG_EVERY=1 # 1000 / 1
+EVAL_EVERY=2 # 5000 / 1
 SAVE_EVERY=$((TRAIN_ITERS / 4)) # 250 / 1
 NUM_LAYERS=4 # 2 / 4
 NUM_HEADS=4
@@ -65,7 +65,7 @@ nvidia-smi
 # --------- Run Training ----------
 echo "[INFO] Starting training job $SLURM_JOB_ID ..."
 singularity exec --nv \
-    --bind ${HOST_PATH}:${CONTAINER_PATH} --bind ${PROJECT} --bind ${DATASET_ROOT} --bind ${OUTPUT_DIR} --bind ${CKPT_DIR} \
+    --bind ${HOST_PATH}:${CONTAINER_PATH} --bind ${PROJECT} --bind ${DATASET_ROOT} --bind ${OUTPUT_DIR} --bind ${CKPT_DIR} --bind ${WANDB_DIR} \
     ${SIF_PATH} torchrun --nproc_per_node=2 --rdzv_endpoint=localhost:$PORT train.py \
     --num_layers $NUM_LAYERS \
     --num_heads $NUM_HEADS \

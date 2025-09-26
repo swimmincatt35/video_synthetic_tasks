@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=train_sel_copy_rnn_short
+#SBATCH --job-name=train_sel_copy_rnn-2
 #SBATCH --nodes=1
 #SBATCH --ntasks=4          
 #SBATCH --gres=gpu:4       
@@ -26,7 +26,7 @@ SIF_PATH="/ubc/cs/research/plai-scratch/chsu35/singularity_setup/video_synth_tas
 PROJECT="/ubc/cs/research/fwood/chsu35/video_synthetic_tasks"
 SCRATCH="/ubc/cs/research/plai-scratch/chsu35"
 DATASET_ROOT="${SCRATCH}/datasets"
-OUTPUT_DIR="${SCRATCH}/rnn-runs"
+OUTPUT_DIR="${SCRATCH}/rnn-runs-2"
 CKPT_DIR="${SCRATCH}/vae-runs"
 mkdir -p "$OUTPUT_DIR"
 
@@ -64,7 +64,7 @@ nvidia-smi
 # --------- Run Training ----------
 echo "[INFO] Starting training job $SLURM_JOB_ID ..."
 singularity exec --nv \
-    --bind ${HOST_PATH}:${CONTAINER_PATH} --bind ${PROJECT} --bind ${DATASET_ROOT} --bind ${OUTPUT_DIR} --bind ${CKPT_DIR} \
+    --bind ${HOST_PATH}:${CONTAINER_PATH} --bind ${PROJECT} --bind ${DATASET_ROOT} --bind ${OUTPUT_DIR} --bind ${CKPT_DIR} --bind ${WANDB_DIR} \
     ${SIF_PATH} torchrun --nproc_per_node=2 --rdzv_endpoint=localhost:$PORT train.py \
     --num_layers $NUM_LAYERS \
     --num_heads $NUM_HEADS \
