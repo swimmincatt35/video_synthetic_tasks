@@ -24,9 +24,11 @@ SIF_PATH="/ubc/cs/research/plai-scratch/chsu35/singularity_setup/video_synth_tas
 # OUTPUT_DIR="/scratch/chsuae/rnn-runs"
 # CKPT_DIR="/scratch/chsuae/vae-runs"
 PROJECT="/ubc/cs/research/fwood/chsu35/video_synthetic_tasks"
-DATASET_ROOT="/ubc/cs/research/plai-scratch/chsu35/datasets"
-OUTPUT_DIR="/ubc/cs/research/plai-scratch/chsu35/rnn-runs"
-CKPT_DIR="/ubc/cs/research/plai-scratch/chsu35/vae-runs"
+SCRATCH="/ubc/cs/research/plai-scratch/chsu35"
+DATASET_ROOT="${SCRATCH}/datasets"
+OUTPUT_DIR="${SCRATCH}/rnn-runs"
+CKPT_DIR="${SCRATCH}/vae-runs"
+mkdir -p "$OUTPUT_DIR"
 
 # --------- Issue selective_scan_interface.py line#20 ---------
 HOST_PATH="${PROJECT}/src/selective_scan_interface.py"
@@ -52,6 +54,10 @@ WANDB_CONF="${PROJECT}/configs/wandb_config.json"
 # --------- Debugging ---------
 FIXED_HEAD=-1 
 SEQ_LEN=2048 # -1 / 4096 / 2048 / 1024 / 512 / 256
+
+# --------- Wandb logging directory ---------
+export WANDB_DIR="${SCRATCH}/wandb_runs"
+mkdir -p "$WANDB_DIR"
 
 nvidia-smi
 
