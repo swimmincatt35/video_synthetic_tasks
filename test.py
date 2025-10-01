@@ -29,6 +29,8 @@ def main(args):
     rank, world_size = setup_distributed()
     device = torch.device(f"cuda:{rank}")
 
+    dist_utils.print0(f"Testing args: {vars(args)}")
+
     # --------------------------
     # Load model & DDP
     # --------------------------
@@ -66,21 +68,24 @@ def main(args):
     # --------------------------
     # Setup Dataset + Dataloader
     # --------------------------
-    for i in range(10,13): # [2^3, 2^9] [2^10, 2^12]
+    for i in range(13,15): # [8,16384] [256,4096]
         seq_len = 2**i
         dist_utils.print0(f"====== ======")
         dist_utils.print0(f"Setting up dataset + dataloader of sequence length: {2**i}.")
         if args.synth_task == 'ind_head':
             dataset = InductionHeadDataset(rank=rank, dataset_name=args.dataset_name, seq_len=seq_len, 
-                                        seed=args.seed+rank, root=args.dataset_root)
+                                           seed=args.seed+rank, root=args.dataset_root)
         elif args.synth_task == 'sel_copy':
             dataset = SelectiveCopyDataset(rank=rank, dataset_name=args.dataset_name, seq_len=seq_len,
-                                        seed=args.seed+rank, root=args.dataset_root, use_latent=True, vae=vae)
+                                           seed=args.seed+rank, root=args.dataset_root, use_latent=True, vae=vae)
         else:
             raise ValueError(f"Unknown synthetic task {args.synth_task}")
         inf_dataloader = infinite_dataloader(
             DataLoader(dataset, batch_size=args.batch_size//world_size, num_workers=0, pin_memory=True)
         )
+
+        # Add a broadcast here
+        dist.barrier(device_ids=[rank])
 
         # --------------------------
         # Loss & Evaluation
