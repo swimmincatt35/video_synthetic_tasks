@@ -315,8 +315,8 @@ def main(args):
                 elif args.synth_task == 'sel_copy':
                     dataset = SelectiveCopyDataset(rank=rank, dataset_name=args.dataset_name, seq_len=seq_len, 
                                                    seed=args.seed+rank, root=args.dataset_root, use_latent=True, vae=vae)
-                    batch_size = int(batch_size//2)
-                    grad_accum = int(grad_accum*2)
+                    batch_size = int(batch_size//int(args.b))
+                    grad_accum = int(grad_accum*int(args.b))
                     dist_utils.print0(f"[Stage {stage}] End of stage {stage}. Increase grad accum to {grad_accum}. Decrease batch to {batch_size}.")
                 inf_dataloader = infinite_dataloader(
                     DataLoader(dataset, batch_size=batch_size, num_workers=0, pin_memory=True)
