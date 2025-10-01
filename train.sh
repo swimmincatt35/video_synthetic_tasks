@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=train_rnn-2
+#SBATCH --job-name=train_rnn-tc
 #SBATCH --nodes=1
 #SBATCH --ntasks=4          
 #SBATCH --gres=gpu:4       
@@ -26,7 +26,7 @@ SIF_PATH="/ubc/cs/research/plai-scratch/chsu35/singularity_setup/video_synth_tas
 PROJECT="/ubc/cs/research/fwood/chsu35/video_synthetic_tasks"
 SCRATCH="/ubc/cs/research/plai-scratch/chsu35"
 DATASET_ROOT="${SCRATCH}/datasets"
-OUTPUT_DIR="${SCRATCH}/rnn-runs-2"
+OUTPUT_DIR="${SCRATCH}/rnn-runs-tc"
 CKPT_DIR="${SCRATCH}/vae-runs"
 mkdir -p "$OUTPUT_DIR"
 
@@ -36,17 +36,17 @@ CONTAINER_PATH="/usr/local/lib/python3.10/dist-packages/mamba_ssm/ops/selective_
 
 # --------- Hyperparameters ---------
 DATASET="mnist" # "cifar10" / "mnist"
-VAE_PATH="${CKPT_DIR}/vae-mnist-lr0.001-b128-kld0.0001/checkpoints/vae_epoch_300.pt"
-# VAE_PATH="${CKPT_DIR}/vae-cifar10-lr0.001-b128-kld0.0001/checkpoints/vae_epoch_300.pt"
+# VAE_PATH="${CKPT_DIR}/vae-mnist-lr0.001-b128-kld0.0001/checkpoints/vae_epoch_300.pt"
+VAE_PATH="${CKPT_DIR}/vae-cifar10-lr0.001-b128-kld0.0001/checkpoints/vae_epoch_300.pt"
 SYNTH_TASK="ind_head" # "ind_head" / "sel_copy"
 BATCH_SIZE=64 # 128 / 8 
-TRAIN_ITERS=4 # 1000000 / 4
+TRAIN_ITERS=100000 # 1000000 / 4
 # The mamba paper trained mamba for 25 epochs (8192 steps/epoch), batch size 8,     => 200000 iters
 # And other baselines were trained for 50 epochs (8192 steps/epoch), batch size 8,  => 400000 iters
 LR=1e-4 # 1e-4 / 1e-5 / 5e-4
-LOG_EVERY=1 # 1000 / 1
-EVAL_EVERY=2 # 5000 / 1
-SAVE_EVERY=$((TRAIN_ITERS / 4)) # 250 / 1
+LOG_EVERY=1000 # 1000 / 1
+EVAL_EVERY=2000 # 5000 / 1
+SAVE_EVERY=$((TRAIN_ITERS / 8)) # 250 / 1
 NUM_LAYERS=4 # 2 / 4
 NUM_HEADS=4
 RNN_TYPE="mingru"
@@ -54,7 +54,11 @@ WANDB_CONF="${PROJECT}/configs/wandb_config.json"
 
 # --------- Debugging ---------
 FIXED_HEAD=-1 # -1 / 252(2K,B8) / 200 / 100
-SEQ_LEN=32 # -1 / 128 / 64(30K,B64) / 32(30K,B8) (5K,B64) / 16(8K,B8) / 8(2K,B8)
+SEQ_LEN=8 # -1 / 128 / 64(30K,B64) / 32(30K,B8) (5K,B64) / 16(8K,B8) / 8(2K,B8)
+
+# --------- Training curriculum ---------
+TC_STAGES=4 
+TC_PARAM=2
 
 # --------- Wandb logging directory ---------
 export WANDB_DIR="${SCRATCH}/wandb_runs"
@@ -84,8 +88,8 @@ singularity exec --nv \
     --save_dir $OUTPUT_DIR \
     --wandb_config $WANDB_CONF \
     --fixed_head $FIXED_HEAD \
-    --seq_len $SEQ_LEN
-
+    --seq_len $SEQ_LEN \
+    --tc --stages $TC_STAGES -b $TC_PARAM
 
 # UBC / Compute Canada Slurm
 

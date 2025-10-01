@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=train_sel_copy_rnn-2
+#SBATCH --job-name=train_sel_copy_rnn-tc
 #SBATCH --nodes=1
 #SBATCH --ntasks=4          
 #SBATCH --gres=gpu:4       
@@ -26,7 +26,7 @@ SIF_PATH="/ubc/cs/research/plai-scratch/chsu35/singularity_setup/video_synth_tas
 PROJECT="/ubc/cs/research/fwood/chsu35/video_synthetic_tasks"
 SCRATCH="/ubc/cs/research/plai-scratch/chsu35"
 DATASET_ROOT="${SCRATCH}/datasets"
-OUTPUT_DIR="${SCRATCH}/rnn-runs-2"
+OUTPUT_DIR="${SCRATCH}/rnn-runs-tc"
 CKPT_DIR="${SCRATCH}/vae-runs"
 mkdir -p "$OUTPUT_DIR"
 
@@ -40,12 +40,12 @@ VAE_PATH="${CKPT_DIR}/vae-mnist-lr0.001-b128-kld0.0001/checkpoints/vae_epoch_300
 # VAE_PATH="${CKPT_DIR}/vae-cifar10-lr0.001-b128-kld0.0001/checkpoints/vae_epoch_300.pt"
 SYNTH_TASK="sel_copy" # "ind_head" / "sel_copy"
 BATCH_SIZE=64 
-TRAIN_ITERS=100000 # 1000000 / 100000
+TRAIN_ITERS=400000 # 400000
 LR=1e-4 
 # Mamba settings: B=64, training iters = 400000, lr=1e-4
-LOG_EVERY=100 # 1000 / 100
-EVAL_EVERY=500 # 5000 / 500
-SAVE_EVERY=$((TRAIN_ITERS / 5)) # 250 / 1
+LOG_EVERY=2000 # 2000 / 100
+EVAL_EVERY=4000 # 4000 / 500
+SAVE_EVERY=$((TRAIN_ITERS / 8)) # 8
 NUM_LAYERS=4 # 2 / 4
 NUM_HEADS=4
 RNN_TYPE="mingru"
@@ -53,7 +53,11 @@ WANDB_CONF="${PROJECT}/configs/wandb_config.json"
 
 # --------- Debugging ---------
 FIXED_HEAD=-1 
-SEQ_LEN=2048 # -1 / 4096 / 2048 / 1024 / 512 / 256
+SEQ_LEN=128 # -1 / 4096 / 2048 / 1024 / 512 / 256
+
+# --------- Training curriculum ---------
+TC_STAGES=4 
+TC_PARAM=2
 
 # --------- Wandb logging directory ---------
 export WANDB_DIR="${SCRATCH}/wandb_runs"
@@ -83,7 +87,8 @@ singularity exec --nv \
     --save_dir $OUTPUT_DIR \
     --wandb_config $WANDB_CONF \
     --fixed_head $FIXED_HEAD \
-    --seq_len $SEQ_LEN
+    --seq_len $SEQ_LEN \
+    --tc --stages $TC_STAGES -b $TC_PARAM
 
 
 # UBC / Compute Canada Slurm

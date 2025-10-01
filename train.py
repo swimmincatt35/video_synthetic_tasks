@@ -66,30 +66,32 @@ def cleanup_distributed():
     dist.destroy_process_group()
 
 
-def train_step(args, model, optimizer, latents, labels, criterion, device, rank):
+
+
+def train_step(args, model, latents, labels, criterion, device, grad_accum):
     model.train()
-    optimizer.zero_grad()
     initial_states = model.module.get_initial_recurrent_state(latents.shape[0], device)
     logits = model(latents, initial_states) 
     B, R, n_classes = logits.shape
     logits = logits.view(B * R, n_classes)           
-    if args.synth_task=='sel_copy':
+    if args.synth_task == 'sel_copy':
         labels = labels.view(B * R)    
-    loss = criterion(logits, labels)
-    loss.backward()
-    optimizer.step()
-    return loss
+    loss = criterion(logits, labels)    
+    (loss / grad_accum).backward()
+    return loss.detach()   
 
 
 @torch.no_grad()
-def evaluate(args, model, inf_dataloader, criterion, vae, world_size, device):
+def evaluate(args, model, inf_dataloader, criterion, vae, world_size, device, grad_accum):
     model.eval()
     total_loss, logit_correct, total_logits = 0.0, 0, 0    
     batch_correct = 0
     total_batches = 0
 
     step = 0
-    while step * args.batch_size < args.eval_samples:
+    batch_size = args.batch_size // grad_accum
+
+    while step * batch_size < args.eval_samples:
 
         videos, labels = next(inf_dataloader) 
         videos, labels = videos.to(device), labels.to(device) 
@@ -162,7 +164,7 @@ def main(args):
 
     assert args.batch_size % world_size == 0
     global_batch_size = args.batch_size
-    batch_size = args.batch_size // world_size
+    batch_size = int(args.batch_size // world_size)
 
     # Setup wandb
     if rank == 0:
@@ -174,6 +176,8 @@ def main(args):
             run_name = f"seq{args.seq_len}-{run_name}"
         with open(args.wandb_config) as f:
             wandb_config = json.load(f)
+        if args.tc:
+            run_name = f"tc-s{args.stages}-p{args.b}-{run_name}"
         setup_wandb(config=vars(args), wandb_config=wandb_config, run_name=run_name, mode="offline")
     dist_utils.print0(f"Training configs: {vars(args)}")
 
@@ -221,6 +225,7 @@ def main(args):
 
     # Optimizer
     optimizer = optim.AdamW(ddp.parameters(), lr=args.lr)
+    optimizer.zero_grad()
 
     # Loss
     criterion = nn.CrossEntropyLoss()
@@ -228,59 +233,97 @@ def main(args):
         running_loss = 0.0
 
     # Train
+    grad_accum = 1
     dist_utils.print0("Training... ")
-    for step in range(args.train_iters):    
-        videos, labels = next(inf_dataloader) 
-        videos, labels = videos.to(device), labels.to(device) 
+    if args.tc:
+        dist_utils.print0(f"Training curriculum enabled, stages: {args.stages}, b: {args.b}.")
+        assert args.train_iters % args.stages == 0
+        iters = args.train_iters // args.stages
+        stages = args.stages
+    else:
+        iters = args.train_iters
+        stages = 1
 
-        if args.synth_task == "ind_head":
-            B, L, C, H, W = videos.shape 
-            #print(videos.shape) # [B, L, 3, H, W]
-            #print(labels.shape) # [B] 
-            videos = videos.view(B*L, C, H, W)  # [B*L, 3, H, W]
-            with torch.no_grad():
-                latents, _ = vae.encoder(videos)  # [B*L, latent_dim]
-            latents = latents.view(B, L, -1)
-        else:
-            assert dataset.is_latent_mode()
-            latents = videos
-        loss = train_step(args, ddp, optimizer, latents, labels, criterion, device, rank)
-        
-        if rank == 0:
-            running_loss = (running_loss * step + loss.item()) / (step+1)
+    for stage in range(stages):
+        if args.tc:
+            dist_utils.print0(f"[Stage {stage}] Start.")
 
-        if (step+1) % args.log_every == 0:
-            torch.cuda.synchronize()
-            peak_allocated_gb = torch.cuda.max_memory_allocated(device) / 1024**3
-            peak_reserved_gb = torch.cuda.max_memory_reserved(device) / 1024**3
-            dist_utils.print0(f"[Step {step+1}] Peak Allocated: {peak_allocated_gb:.2f} GB | Peak Reserved: {peak_reserved_gb:.2f} GB")
-            torch.cuda.reset_peak_memory_stats(device)
-            if rank==0:
-                dist_utils.print0(f"[Step {step+1}] Running train Loss: {running_loss:.4f}") 
-                wandb.log({"train/loss": loss.item(),}, step=step+1) 
-        
-        if (step+1) % args.eval_every == 0:
-            dist_utils.print0("Evaluating... ")
-            eval_loss, eval_acc, eval_batch_acc = evaluate(args, ddp, inf_dataloader, criterion, vae, world_size, device)
+        for step in range(iters):  
+            global_step = stage * iters + step
+
+            loss = 0
+            for accum in range(grad_accum):
+                videos, labels = next(inf_dataloader) 
+                videos, labels = videos.to(device), labels.to(device) 
+                if args.synth_task == "ind_head":
+                    B, L, C, H, W = videos.shape 
+                    #print(videos.shape) # [B, L, 3, H, W]
+                    #print(labels.shape) # [B] 
+                    videos = videos.view(B*L, C, H, W)  # [B*L, 3, H, W]
+                    with torch.no_grad():
+                        latents, _ = vae.encoder(videos)  # [B*L, latent_dim]
+                    latents = latents.view(B, L, -1)
+                else:
+                    assert dataset.is_latent_mode()
+                    latents = videos
+                loss += train_step(args, ddp, latents, labels, criterion, device, grad_accum)
+
+            optimizer.step()
+            optimizer.zero_grad()
+
             if rank == 0:
-                dist_utils.print0(f"[Step {step+1}] Eval Loss: {eval_loss:.4f}, Eval Acc: {eval_acc:.4f}, Eval Batch Acc: {eval_batch_acc:.4f}")
-                wandb.log({"eval/loss": eval_loss, "eval/acc": eval_acc, "eval/batch_acc": eval_batch_acc}, step=step+1)
-        
-        if (step + 1) % args.save_every == 0 and rank == 0:
-            save_dir = os.path.join(args.save_dir, run_name)
-            os.makedirs(save_dir, exist_ok=True)
-            # Save model
-            ckpt_path = os.path.join(save_dir, f"ckpt_{step+1}.pt")
-            torch.save(ddp.module.state_dict(), ckpt_path)
-            dist_utils.print0(f"Saved model checkpoint to {ckpt_path}")
-            # Save optimizer
-            opt_path = os.path.join(save_dir, f"optimizer_{step+1}.pt")
-            torch.save(optimizer.state_dict(), opt_path)
-            dist_utils.print0(f"Saved optimizer state to {opt_path}")
+                running_loss = (running_loss * global_step + loss.item()) / (global_step+1)
 
-        
+            if (global_step+1) % args.log_every == 0:
+                torch.cuda.synchronize()
+                peak_allocated_gb = torch.cuda.max_memory_allocated(device) / 1024**3
+                peak_reserved_gb = torch.cuda.max_memory_reserved(device) / 1024**3
+                dist_utils.print0(f"[Step {global_step+1}] Peak Allocated: {peak_allocated_gb:.2f} GB | Peak Reserved: {peak_reserved_gb:.2f} GB")
+                torch.cuda.reset_peak_memory_stats(device)
+                if rank==0:
+                    dist_utils.print0(f"[Step {global_step+1}] Running train Loss: {running_loss:.4f}") 
+                    wandb.log({"train/loss": loss.item(),}, step=global_step+1) 
+            
+            if (global_step+1) % args.eval_every == 0:
+                dist_utils.print0("Evaluating... ")
+                eval_loss, eval_acc, eval_batch_acc = evaluate(args, ddp, inf_dataloader, criterion, vae, world_size, device, grad_accum)
+                if rank == 0:
+                    dist_utils.print0(f"[Step {global_step+1}] Eval Loss: {eval_loss:.4f}, Eval Acc: {eval_acc:.4f}, Eval Batch Acc: {eval_batch_acc:.4f}")
+                    wandb.log({"eval/loss": eval_loss, "eval/acc": eval_acc, "eval/batch_acc": eval_batch_acc}, step=global_step+1)
+            
+            if (global_step + 1) % args.save_every == 0 and rank == 0:
+                save_dir = os.path.join(args.save_dir, run_name)
+                os.makedirs(save_dir, exist_ok=True)
+                # Save model
+                ckpt_path = os.path.join(save_dir, f"ckpt_{global_step+1}.pt")
+                torch.save(ddp.module.state_dict(), ckpt_path)
+                dist_utils.print0(f"Saved model checkpoint to {ckpt_path}")
+                # Save optimizer
+                opt_path = os.path.join(save_dir, f"optimizer_{global_step+1}.pt")
+                torch.save(optimizer.state_dict(), opt_path)
+                dist_utils.print0(f"Saved optimizer state to {opt_path}")
+
+        if args.tc:
+            dist_utils.print0(f"[Stage {stage}] Done.")
+            if stage != (stages-1):
+                seq_len *= int(args.b)
+                dist_utils.print0(f"[Stage {stage}] End of stage {stage}. Increase seq length to {seq_len}.")
+                if args.synth_task == 'ind_head':
+                    dataset = InductionHeadDataset(rank=rank, dataset_name=args.dataset_name, seq_len=seq_len, 
+                                                   seed=args.seed+rank, root=args.dataset_root, fixed_head=args.fixed_head
+                                                   )
+                elif args.synth_task == 'sel_copy':
+                    dataset = SelectiveCopyDataset(rank=rank, dataset_name=args.dataset_name, seq_len=seq_len, 
+                                                   seed=args.seed+rank, root=args.dataset_root, use_latent=True, vae=vae)
+                    batch_size = int(batch_size//2)
+                    grad_accum = int(grad_accum*2)
+                    dist_utils.print0(f"[Stage {stage}] End of stage {stage}. Increase grad accum to {grad_accum}. Decrease batch to {batch_size}.")
+                inf_dataloader = infinite_dataloader(
+                    DataLoader(dataset, batch_size=batch_size, num_workers=0, pin_memory=True)
+                )
+    
     dist_utils.print0("Done...")
-    cleanup_distributed()
+    cleanup_distributed()               
 
 
 # --------------------------
@@ -312,6 +355,11 @@ if __name__ == "__main__":
     parser.add_argument("--eval_every", type=int, default=50)
     parser.add_argument("--save_every", type=int, default=100)
     parser.add_argument("--save_dir", type=str, default="./rnn-runs")
+
+    # Curriculum
+    parser.add_argument("--tc", action="store_true", help="Enable curriculum.")
+    parser.add_argument("--stages", type=int, default=4, help="Number of stages.")
+    parser.add_argument("-b", type=int, default=4, help="Curriculum parameter.")
 
     # W&B
     parser.add_argument("--wandb_config", type=str, default=None)
