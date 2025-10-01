@@ -36,8 +36,8 @@ CONTAINER_PATH="/usr/local/lib/python3.10/dist-packages/mamba_ssm/ops/selective_
 
 # --------- Hyperparameters ---------
 DATASET="mnist" # "cifar10" / "mnist"
-# VAE_PATH="${CKPT_DIR}/vae-mnist-lr0.001-b128-kld0.0001/checkpoints/vae_epoch_300.pt"
-VAE_PATH="${CKPT_DIR}/vae-cifar10-lr0.001-b128-kld0.0001/checkpoints/vae_epoch_300.pt"
+VAE_PATH="${CKPT_DIR}/vae-mnist-lr0.001-b128-kld0.0001/checkpoints/vae_epoch_300.pt"
+# VAE_PATH="${CKPT_DIR}/vae-cifar10-lr0.001-b128-kld0.0001/checkpoints/vae_epoch_300.pt"
 SYNTH_TASK="ind_head" # "ind_head" / "sel_copy"
 BATCH_SIZE=64 # 128 / 8 
 TRAIN_ITERS=100000 # 1000000 / 4
@@ -54,11 +54,11 @@ WANDB_CONF="${PROJECT}/configs/wandb_config.json"
 
 # --------- Debugging ---------
 FIXED_HEAD=-1 # -1 / 252(2K,B8) / 200 / 100
-SEQ_LEN=8 # -1 / 128 / 64(30K,B64) / 32(30K,B8) (5K,B64) / 16(8K,B8) / 8(2K,B8)
+SEQ_LEN=4 # -1 / 128 / 64(30K,B64) / 32(30K,B8) (5K,B64) / 16(8K,B8) / 8(2K,B8)
 
 # --------- Training curriculum ---------
 TC_STAGES=4 
-TC_PARAM=2
+TC_PARAM=4
 
 # --------- Wandb logging directory ---------
 export WANDB_DIR="${SCRATCH}/wandb_runs"
