@@ -178,6 +178,11 @@ def main(args):
             wandb_config = json.load(f)
         if args.tc:
             run_name = f"tc-s{args.stages}-p{args.b}-{run_name}"
+        if args.resume:
+            filename = os.path.basename(args.resume) 
+            resume_dir = os.path.dirname(args.resume)
+            global_step = int(filename.replace("ckpt_", "").replace(".pt", ""))
+            run_name = f"res{global_step}-{run_name}"
         setup_wandb(config=vars(args), wandb_config=wandb_config, run_name=run_name, mode="offline")
     dist_utils.print0(f"Training configs: {vars(args)}")
 
@@ -193,8 +198,33 @@ def main(args):
         video_synth_task_out_dim=10,
         synth_task_rollout_len=synth_task_rollout_len
     ).to(device)
+
+    # Ensure same initialization
+    for param in model.parameters():
+        dist.broadcast(param.data, src=0)
+
     dist_utils.print0("Setting up ddp... ")
     ddp = torch.nn.parallel.DistributedDataParallel(model, device_ids=[rank])
+
+    # Only rank 0 loads from disk
+    if args.resume:
+        if rank == 0:
+            opt_path = os.path.join(resume_dir, f"optimizer_{global_step}.pt")
+            model_state = torch.load(args.resume, map_location="cpu")
+            opt_state   = torch.load(opt_path, map_location="cpu")
+            dist_utils.print0(f"[Resume] Done loading {args.resume}...")
+        else:
+            global_step, model_state, opt_state = None, None, None
+            print("[Resume] Waiting... ")
+
+        # Sync across ranks
+        obj_list = [global_step, model_state, opt_state]
+        dist.broadcast_object_list(obj_list, src=0)
+        global_step, model_state, opt_state = obj_list
+        print("[Resume] Broadcasted... ")
+
+        ddp.module.load_state_dict(model_state)
+        dist_utils.print0(f"[Resume] Resumed training from {args.resume}")
 
     # VAE
     if args.dataset_name=="mnist":
@@ -226,6 +256,9 @@ def main(args):
     # Optimizer
     optimizer = optim.AdamW(ddp.parameters(), lr=args.lr)
     optimizer.zero_grad()
+    if args.resume:
+        optimizer.load_state_dict(opt_state)
+        dist_utils.print0("[Resume] Resumed optimizer state...")
 
     # Loss
     criterion = nn.CrossEntropyLoss()
@@ -242,9 +275,10 @@ def main(args):
         stages = args.stages
     else:
         iters = args.train_iters
-        stages = 1
-
-    for stage in range(stages):
+        stages = 1        
+    start_stage = global_step // iters if args.resume else 0
+    
+    for stage in range(start_stage, stages):
         if args.tc:
             dist_utils.print0(f"[Stage {stage}] Start.")
 
@@ -370,6 +404,9 @@ if __name__ == "__main__":
     # Debug fixed_head, seq_len
     parser.add_argument("--fixed_head", type=int, default=-1)
     parser.add_argument("--seq_len", type=int, default=-1)
+
+    # Resume
+    parser.add_argument("--resume", type=str, default=None)
 
     args = parser.parse_args()
     main(args)
